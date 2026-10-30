@@ -7,6 +7,9 @@ import type { AudioFormat } from './AudioAsset'
 import type { TTSProvider } from './TTSProvider'
 
 const EXTENSIONS: Record<AudioFormat, string> = { ogg: 'opus', pcm: 'pcm' }
+// Files used this recently are never evicted, whatever the size and age limits, so a file that is
+// queued or playing (up to DEFAULT_PLAYBACK_TIMEOUT_MS, 2 minutes) is not deleted under the player
+export const RECENT_USE_MS = 10 * 60 * 1000
 
 export interface AudioCacheOptions {
   dir?: string
@@ -64,7 +67,8 @@ export class AudioCache {
   }
 
   // Removes files unused for maxAgeMs, then the least recently used ones until the cache fits in
-  // maxBytes. In-flight and *.tmp files are never touched. Concurrent calls share one run.
+  // maxBytes. In-flight and *.tmp files, and files used within RECENT_USE_MS, are never touched.
+  // Concurrent calls share one run.
   public evict(now = Date.now()): Promise<EvictionResult> {
     if (!this.evicting) {
       this.evicting = this.runEviction(now)
@@ -93,6 +97,10 @@ export class AudioCache {
     const result: EvictionResult = { removed: 0, freedBytes: 0, keptBytes: 0 }
     let full = false
     for (const file of files) {
+      if (now - file.usedAt < RECENT_USE_MS) {
+        result.keptBytes += file.size
+        continue
+      }
       full ||= now - file.usedAt > this.maxAgeMs || result.keptBytes + file.size > this.maxBytes
       if (!full) {
         result.keptBytes += file.size
