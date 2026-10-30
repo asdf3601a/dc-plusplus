@@ -1,9 +1,7 @@
-import { existsSync as exists } from 'node:fs'
 import { Status } from 'status-client'
 import { checkData, EXIT_DATA_CHECK_FAILED } from './Core/DataMigration'
 import { Discord } from './Core/Discord/Core'
 import { SQLiteCore } from './Core/SQLite/Core'
-import { migrateMongoToSqlite } from './Core/SQLite/Migration'
 import { instances } from './Utils/Instances'
 
 let quitting = false
@@ -20,14 +18,6 @@ async function main() {
   // Initialize SQLite
   const db = new SQLiteCore()
   instances.db = db
-
-  const dumpPath = process.env.MONGODB_DUMP_PATH ?? './mongo_dump.json'
-
-  if (exists(dumpPath)) {
-    // Attempt to migrate from MongoDB dump file if path is provided in .env
-    logger.info(`MongoDB dump found: ${dumpPath}. Attempting data migration...`)
-    await migrateMongoToSqlite(dumpPath)
-  }
 
   // Since SQLite/Prisma is synchronous initialization for the client
   // (connection is lazy), we can start the bot immediately.

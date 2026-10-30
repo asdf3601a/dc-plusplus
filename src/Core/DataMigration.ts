@@ -15,6 +15,10 @@ export const DATA_VERSION = 2
 // pm2 does not restart into the same error.
 export const EXIT_DATA_CHECK_FAILED = 78
 
+// A MongoDB export to import into SQLite; `pnpm migrate` imports and then deletes it, and the bot refuses
+// to start while it exists
+export const MONGODB_DUMP_PATH = process.env.MONGODB_DUMP_PATH ?? './mongo_dump.json'
+
 const RECORD_FILE = 'data-version.json'
 const MIGRATIONS_DIR = 'prisma/migrations'
 const MIGRATE_HINT = '請先執行 `pnpm migrate`'
@@ -81,7 +85,8 @@ export async function migrateData({ skipInvalid = false } = {}): Promise<boolean
 }
 
 // Run at bot startup; only reads. Returns false (after logging one error) when the bot must not start:
-// unapplied Prisma migrations, a missing or older data version, or a malformed or newer record.
+// unapplied Prisma migrations, a missing or older data version, a MongoDB dump not imported yet, or a
+// malformed or newer record.
 export async function checkData(): Promise<boolean> {
   const path = recordFilePath()
   const record = readUsableRecord(path, 'refusing to start')
@@ -92,6 +97,7 @@ export async function checkData(): Promise<boolean> {
   if (pending.length > 0) problems.push(`unapplied database migrations: ${pending.join(', ')}`)
   if (record.kind === 'none') problems.push(`no data version recorded in ${path}`)
   else if (record.version < DATA_VERSION) problems.push(`data version ${record.version} is older than ${DATA_VERSION}`)
+  if (exists(MONGODB_DUMP_PATH)) problems.push(`MongoDB dump ${MONGODB_DUMP_PATH} not imported yet`)
   if (problems.length === 0) return true
 
   logger.error(`Data is not up to date (${problems.join('; ')}). ${MIGRATE_HINT}`)

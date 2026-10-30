@@ -44,14 +44,7 @@ If you have an existing MongoDB database and want to move the data to the new SQ
 
    *The bot will exit immediately after backup and migrating config.*
 
-4. **Initialize SQLite Database**:
-   Run the following command to create the SQLite database and apply the initial schema:
-
-   ```bash
-   pnpm db:migrate
-   ```
-
-5. **Prepare MongoDB Dump**:
+4. **Prepare MongoDB Dump**:
    Export your MongoDB collection to a JSON file using `mongoexport`:
 
    ```bash
@@ -68,21 +61,24 @@ If you have an existing MongoDB database and want to move the data to the new SQ
 
    Place the resulting `mongo_dump.json` file in the project root directory.
 
-6. **Run Data Migration**:
-   Start the bot again. The bot will detect the `mongo_dump.json` and `config.json`, and perform the data migration to SQLite during the boot sequence:
+5. **Run Data Migration**:
+   Run `pnpm migrate`. It creates the SQLite database (or applies pending migrations), imports every document of `mongo_dump.json` into it, deletes the dump once the import succeeded, and then upgrades the rest of the data:
 
    ```bash
-   node dist
+   pnpm migrate
    ```
 
-   *Note: If your dump file has a different name or location, you can pass the path via an environment variable when starting the bot:*
+   If the import fails, `pnpm migrate` exits with an error and the dump is kept; fix the problem and run it again (documents are upserted by `serverID`). The bot never imports the dump on its own: while the dump file is present, `pnpm start` logs an error asking you to run `pnpm migrate` and exits with code 78.
+
+   *Note: If your dump file has a different name or location, pass the path via an environment variable, to both `pnpm migrate` and `pnpm start`:*
 
    ```bash
-   MONGODB_DUMP_PATH="./my_custom_dump.json" node dist
+   MONGODB_DUMP_PATH="./my_custom_dump.json" pnpm migrate
+   MONGODB_DUMP_PATH="./my_custom_dump.json" pnpm start
    ```
 
-7. **Verification**:
-   After the bot starts, check if the `voice-log.db` file contains the migrated data using Prisma Studio:
+6. **Verification**:
+   Check that the `voice-log.db` file contains the migrated data using Prisma Studio, then start the bot with `pnpm start`:
 
    ```bash
    pnpm db:studio

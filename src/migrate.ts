@@ -1,9 +1,10 @@
 // Entry point of `pnpm migrate`: checks the data version record and the assets (preflight), applies the
-// database migrations (`prisma migrate deploy`), then upgrades the app-side data. Running the three
-// steps from here, not from the package.json script, passes options such as --skip-invalid to all of
-// them. With --preflight it stops after the check.
+// database migrations (`prisma migrate deploy`), imports a MongoDB dump if there is one, then upgrades
+// the app-side data. Running the steps from here, not from the package.json script, passes options such
+// as --skip-invalid to all of them. With --preflight it stops after the check.
 import { spawnSync } from 'node:child_process'
-import { migrateData, preflightData } from './Core/DataMigration'
+import { existsSync as exists } from 'node:fs'
+import { MONGODB_DUMP_PATH, migrateData, preflightData } from './Core/DataMigration'
 import { instances } from './Utils/Instances'
 
 const OPTIONS = ['--preflight', '--skip-invalid']
@@ -20,7 +21,22 @@ async function run() {
   if (!preflightData({ skipInvalid })) return false
   if (args.includes('--preflight')) return true
   if (!deployDatabaseMigrations()) return false
+  if (!(await importMongoDump())) return false
   return migrateData({ skipInvalid })
+}
+
+// Upserts every document of the dump into SQLite and deletes the dump on success
+async function importMongoDump() {
+  if (!exists(MONGODB_DUMP_PATH)) return true
+  // Loaded here: importing it creates the database directory, which --preflight must not do
+  const { migrateMongoToSqlite } = await import('./Core/SQLite/Migration')
+  try {
+    await migrateMongoToSqlite(MONGODB_DUMP_PATH)
+    return true
+  } catch {
+    // migrateMongoToSqlite logged the error
+    return false
+  }
 }
 
 // The Prisma CLI of this install, run with this node so it needs no shell or PATH entry
