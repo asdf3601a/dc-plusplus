@@ -9,6 +9,8 @@
   "author": "Jim Chen <jimchen5209@gmail.com>",
   "license": "AGPL-3.0-only",
   "scripts": {
+    "start": "node dist/index.js",
+    "migrate": "prisma migrate deploy && node dist/migrate.js",
     "lint": "biome check --write",
     "lint:unsafe": "biome check --write --unsafe",
     "biome:ci": "biome ci",
