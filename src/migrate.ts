@@ -1,9 +1,10 @@
 // Entry point of `pnpm migrate`. With --preflight (run before `prisma migrate deploy`) it only checks
-// the data version record; without it (run after) it upgrades the app-side data.
+// the data version record; without it (run after) it upgrades the app-side data. `pnpm migrate
+// --skip-invalid` passes --skip-invalid to the last run only.
 import { migrateData, preflightData } from './Core/DataMigration'
 import { instances } from './Utils/Instances'
 
-const OPTIONS = ['--preflight']
+const OPTIONS = ['--preflight', '--skip-invalid']
 
 async function run() {
   const args = process.argv.slice(2)
@@ -13,7 +14,7 @@ async function run() {
     return false
   }
   if (args.includes('--preflight')) return preflightData()
-  return migrateData()
+  return migrateData({ skipInvalid: args.includes('--skip-invalid') })
 }
 
 run()

@@ -40,6 +40,7 @@ The database is versioned by Prisma's migration history (`prisma/migrations`). T
 - No record and no `assets/*.json`: a fresh install; the current version is recorded and nothing is converted.
 - No record but some `assets/*.json`: an install from before data versions (version 1).
 - Older version: the files that need converting are copied to `backup/assets-<YYYYMMDD-HHmmss>/` (never overwriting an existing backup), then converted one version at a time. The new version is recorded only after every file was converted; on a failure the old version stays and running `pnpm migrate` again finishes the job.
+- An `assets/*.json` that is not a JSON object (invalid JSON, an array, ...) fails the run before anything is converted, and the error lists every such file. Fix or remove them, or run `pnpm migrate --skip-invalid` to leave them unconverted and record the new version anyway (the bot then skips those files with an error).
 - Newer version (a downgrade) or a malformed record: an error is logged, nothing is changed (the database is not migrated either), and both `pnpm migrate` and `pnpm start` exit with an error.
 
 Rules for contributors:

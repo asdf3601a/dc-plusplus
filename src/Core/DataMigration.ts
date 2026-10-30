@@ -24,8 +24,9 @@ type VersionRecord = { kind: 'none' } | { kind: 'ok'; version: number } | { kind
 
 // Run by `pnpm migrate` after `prisma migrate deploy`. Converts assets/<id>.json up to DATA_VERSION and
 // records the version only when every file was converted; otherwise the record is left as it was, so
-// running it again finishes the job. Returns false on failure.
-export async function migrateData(): Promise<boolean> {
+// running it again finishes the job. An asset file that is not a JSON object fails the run before
+// anything is converted, unless skipInvalid leaves such files as they are. Returns false on failure.
+export async function migrateData({ skipInvalid = false } = {}): Promise<boolean> {
   const path = recordFilePath()
   const record = readUsableRecord(path, 'nothing was converted')
   if (!record) return false
@@ -44,7 +45,13 @@ export async function migrateData(): Promise<boolean> {
   // No record but existing assets/<id>.json: the install predates data versions, so version 1
   const from = record.kind === 'ok' ? record.version : 1
   logger.info(`Upgrading data from version ${from} to ${DATA_VERSION}`)
-  const pending = planAssets(files, from)
+  const { pending, invalid } = planAssets(files, from, skipInvalid)
+  if (invalid.length > 0 && !skipInvalid) {
+    logger.error(
+      `${invalid.length} asset files are not valid: ${invalid.join(', ')}; nothing was converted and data version is still ${from}. Fix or remove them and run \`pnpm migrate\` again, or run \`pnpm migrate --skip-invalid\` to leave them unconverted`
+    )
+    return false
+  }
 
   if (pending.length > 0) {
     try {
@@ -114,21 +121,25 @@ function readUsableRecord(path: string, outcome: string) {
   return record
 }
 
-// Runs the steps from `from` to DATA_VERSION on every file and returns the ones that changed.
-// Unreadable files are logged and left alone.
-function planAssets(files: string[], from: number) {
+// Runs the steps from `from` to DATA_VERSION on every file and returns the ones that changed, and the
+// paths of files that are not a JSON object (each logged, never converted).
+function planAssets(files: string[], from: number, skipInvalid: boolean) {
   const pending: { file: string; config: MemberConfig }[] = []
+  const invalid: string[] = []
+  const label = skipInvalid ? 'Skipping' : 'Invalid'
   for (const file of files) {
     const path = `${ASSETS_DIR}/${file}`
     let config: unknown
     try {
       config = JSON.parse(readFile(path, { encoding: 'utf-8' }))
     } catch (error) {
-      logger.error(`Skipping ${path}: invalid JSON`, error)
+      logger.error(`${label} ${path}: invalid JSON`, error)
+      invalid.push(path)
       continue
     }
     if (typeof config !== 'object' || config === null || Array.isArray(config)) {
-      logger.error(`Skipping ${path}: unsupported format (expected a JSON object)`)
+      logger.error(`${label} ${path}: unsupported format (expected a JSON object)`)
+      invalid.push(path)
       continue
     }
     let current = config as MemberConfig
@@ -144,7 +155,7 @@ function planAssets(files: string[], from: number) {
     }
     if (changed) pending.push({ file, config: current })
   }
-  return pending
+  return { pending, invalid }
 }
 
 // The record lives next to the SQLite database file
