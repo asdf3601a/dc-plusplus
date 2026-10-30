@@ -6,6 +6,8 @@ module.exports = {
         // args: 'one two',
         instances: 1,
         autorestart: true,
+        // The bot exits with 78 until `pnpm migrate` is run; restarting would only repeat that
+        stop_exit_codes: [78],
         watch: false,
         max_memory_restart: '512M',
         env_production: {
@@ -19,7 +21,7 @@ module.exports = {
             ref: 'origin/master',
             repo: 'https://github.com/jimchen5209/Discord-Voice-log.git',
             path: '/var/www/production',
-            'post-deploy': 'yarn install && yarn build:prod && pm2 reload ecosystem.config.js --env production'
+            'post-deploy': 'pnpm install && pnpm build && pnpm migrate && pm2 reload ecosystem.config.js --env production'
         }
     }
 };

@@ -30,7 +30,7 @@
 2. Run `pnpm migrate`. It applies pending database migrations (`prisma migrate deploy`), then upgrades `assets/<User ID>.json` to the current [data version](#data-version). Running it again changes nothing.
 3. Run `pnpm start`.
 
-The bot never migrates on its own: if the database has unapplied migrations or the data version is older than the code's, it logs ``請先執行 `pnpm migrate` `` and exits.
+The bot never migrates on its own: if the database has unapplied migrations or the data version is older than the code's, it logs ``請先執行 `pnpm migrate` `` and exits with code 78, which pm2 does not restart (`stop_exit_codes` in `ecosystem.config.js`). `pm2 deploy` runs `pnpm migrate` in its post-deploy step before reloading the bot.
 
 ## Data version
 

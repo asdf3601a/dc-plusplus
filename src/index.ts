@@ -1,6 +1,6 @@
 import { existsSync as exists } from 'node:fs'
 import { Status } from 'status-client'
-import { checkData } from './Core/DataMigration'
+import { checkData, EXIT_NOT_MIGRATED } from './Core/DataMigration'
 import { Discord } from './Core/Discord/Core'
 import { SQLiteCore } from './Core/SQLite/Core'
 import { migrateMongoToSqlite } from './Core/SQLite/Migration'
@@ -15,7 +15,9 @@ if (instances.config.debug) instances.mainLogger.settings.minLevel = 0 // Silly
 const status = new Status('VoiceLog')
 
 async function main() {
-  if (!(await checkData())) process.exit(1)
+  const data = await checkData()
+  if (data === 'not-migrated') process.exit(EXIT_NOT_MIGRATED)
+  if (data !== 'ok') process.exit(1)
 
   // Initialize SQLite
   const db = new SQLiteCore()

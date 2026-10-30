@@ -11,6 +11,10 @@ import { prisma } from './SQLite/Client'
 // one step for the bump to ASSET_STEPS.
 export const DATA_VERSION = 2
 
+// Exit code of the bot when it refuses to start until `pnpm migrate` is run (EX_CONFIG in sysexits.h).
+// ecosystem.config.js lists it in stop_exit_codes so pm2 does not restart into the same error.
+export const EXIT_NOT_MIGRATED = 78
+
 const RECORD_FILE = 'data-version.json'
 const MIGRATIONS_DIR = 'prisma/migrations'
 const MIGRATE_HINT = '請先執行 `pnpm migrate`'
@@ -71,22 +75,23 @@ export async function migrateData(): Promise<boolean> {
   return true
 }
 
-// Run at bot startup; only reads. Returns false (after logging one error) when the bot must not start:
-// unapplied Prisma migrations, a data version older than DATA_VERSION, or an unusable record.
-export async function checkData(): Promise<boolean> {
+// Run at bot startup; only reads. Unless 'ok', the bot must not start and one error was logged:
+// 'not-migrated' for unapplied Prisma migrations or a missing or older data version, 'unusable' for a
+// malformed record or one newer than DATA_VERSION.
+export async function checkData(): Promise<'ok' | 'not-migrated' | 'unusable'> {
   const path = recordFilePath()
   const record = readUsableRecord(path, 'refusing to start')
-  if (!record) return false
+  if (!record) return 'unusable'
 
   const problems: string[] = []
   const pending = await pendingMigrations()
   if (pending.length > 0) problems.push(`unapplied database migrations: ${pending.join(', ')}`)
   if (record.kind === 'none') problems.push(`no data version recorded in ${path}`)
   else if (record.version < DATA_VERSION) problems.push(`data version ${record.version} is older than ${DATA_VERSION}`)
-  if (problems.length === 0) return true
+  if (problems.length === 0) return 'ok'
 
   logger.error(`Data is not up to date (${problems.join('; ')}). ${MIGRATE_HINT}`)
-  return false
+  return 'not-migrated'
 }
 
 // The record, or undefined (after logging an error ending in `outcome`) when it is malformed or newer
