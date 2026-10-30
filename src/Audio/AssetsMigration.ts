@@ -1,8 +1,16 @@
 import { constants, existsSync as exists, mkdirSync as mkDir, readdirSync as readDir } from 'node:fs'
 import { copyFile } from 'node:fs/promises'
 import { extname } from 'node:path'
-import { BACKUP_DIR, backupTimestamp } from '../Utils/Backup'
 import type { MemberConfig } from './Audio'
+
+const BACKUP_DIR = 'backup'
+
+// YYYYMMDD-HHmmss in local time
+function backupTimestamp(date = new Date()) {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  const day = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
+  return `${day}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+}
 
 export const ASSETS_DIR = 'assets'
 // Old format: use_wave_tts true with a voice -> Google Cloud, anything else -> Google Translate
