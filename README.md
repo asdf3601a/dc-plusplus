@@ -27,10 +27,10 @@
 ## Upgrading
 
 1. Stop the bot and back up the database file (by default `prisma/voice-log.db`). Database migrations are **not** backed up automatically.
-2. Run `pnpm migrate`. It first checks the data version record and stops before touching the database if the record is malformed or newer than the code. It then applies pending database migrations (`prisma migrate deploy`) and upgrades `assets/<User ID>.json` to the current [data version](#data-version). Running it again changes nothing.
+2. Run `pnpm migrate`. It first checks the data version record and the assets, and stops before touching the database if the record is malformed or newer than the code or an asset file is invalid (see below). It then applies pending database migrations (`prisma migrate deploy`) and upgrades `assets/<User ID>.json` to the current [data version](#data-version). Running it again changes nothing.
 3. Run `pnpm start`.
 
-The bot never migrates on its own: if the database has unapplied migrations or the data version is older than the code's, it logs ``請先執行 `pnpm migrate` `` and exits with code 78, which pm2 does not restart (`stop_exit_codes` in `ecosystem.config.js`). `pm2 deploy` runs `pnpm migrate` in its post-deploy step before reloading the bot.
+The bot never migrates on its own: if the database has unapplied migrations or the data version is older than the code's, it logs ``請先執行 `pnpm migrate` `` and exits with code 78. It also exits with code 78, after logging an error, when the data version record is malformed or newer than the code. pm2 does not restart the bot on code 78 (`stop_exit_codes` in `ecosystem.config.js`). `pm2 deploy` runs `pnpm migrate` in its post-deploy step before reloading the bot.
 
 ## Data version
 
@@ -40,8 +40,8 @@ The database is versioned by Prisma's migration history (`prisma/migrations`). T
 - No record and no `assets/*.json`: a fresh install; the current version is recorded and nothing is converted.
 - No record but some `assets/*.json`: an install from before data versions (version 1).
 - Older version: the files that need converting are copied to `backup/assets-<YYYYMMDD-HHmmss>/` (never overwriting an existing backup), then converted one version at a time. The new version is recorded only after every file was converted; on a failure the old version stays and running `pnpm migrate` again finishes the job.
-- An `assets/*.json` that is not a JSON object (invalid JSON, an array, ...) fails the run before anything is converted, and the error lists every such file. Fix or remove them, or run `pnpm migrate --skip-invalid` to leave them unconverted and record the new version anyway (the bot then skips those files with an error).
-- Newer version (a downgrade) or a malformed record: an error is logged, nothing is changed (the database is not migrated either), and both `pnpm migrate` and `pnpm start` exit with an error.
+- An `assets/*.json` that is not a JSON object (invalid JSON, an array, ...) fails the run before the database is migrated or anything is converted, and the error lists every such file. Fix or remove them, or run `pnpm migrate --skip-invalid` (or `pnpm migrate -- --skip-invalid`; the option applies to every step) to leave them unconverted and record the new version anyway (the bot then skips those files with an error).
+- Newer version (a downgrade) or a malformed record: an error is logged, nothing is changed (the database is not migrated either), `pnpm migrate` exits with code 1 and `pnpm start` with code 78.
 
 Rules for contributors:
 - Bump `DATA_VERSION` only for a breaking change to the assets format, at most once per PR, with exactly one step for the bump in `ASSET_STEPS` (`src/Audio/AssetsMigration.ts`).

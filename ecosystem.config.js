@@ -6,7 +6,7 @@ module.exports = {
         // args: 'one two',
         instances: 1,
         autorestart: true,
-        // The bot exits with 78 until `pnpm migrate` is run; restarting would only repeat that
+        // The bot exits with 78 when its data check fails (run `pnpm migrate`, or fix data-version.json); restarting would only repeat that
         stop_exit_codes: [78],
         watch: false,
         max_memory_restart: '512M',

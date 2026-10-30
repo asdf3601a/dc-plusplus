@@ -10,9 +10,10 @@ import { writeAtomic } from '../Utils/WriteAtomic'
 // one step for the bump to ASSET_STEPS.
 export const DATA_VERSION = 2
 
-// Exit code of the bot when it refuses to start until `pnpm migrate` is run (EX_CONFIG in sysexits.h).
-// ecosystem.config.js lists it in stop_exit_codes so pm2 does not restart into the same error.
-export const EXIT_NOT_MIGRATED = 78
+// Exit code of the bot when the startup data check fails: not migrated yet, or a malformed or newer
+// data version record (EX_CONFIG in sysexits.h). ecosystem.config.js lists it in stop_exit_codes so
+// pm2 does not restart into the same error.
+export const EXIT_DATA_CHECK_FAILED = 78
 
 const RECORD_FILE = 'data-version.json'
 const MIGRATIONS_DIR = 'prisma/migrations'
@@ -47,9 +48,7 @@ export async function migrateData({ skipInvalid = false } = {}): Promise<boolean
   logger.info(`Upgrading data from version ${from} to ${DATA_VERSION}`)
   const { pending, invalid } = planAssets(files, from, skipInvalid)
   if (invalid.length > 0 && !skipInvalid) {
-    logger.error(
-      `${invalid.length} asset files are not valid: ${invalid.join(', ')}; nothing was converted and data version is still ${from}. Fix or remove them and run \`pnpm migrate\` again, or run \`pnpm migrate --skip-invalid\` to leave them unconverted`
-    )
+    logInvalidAssets(invalid, `nothing was converted and data version is still ${from}`)
     return false
   }
 
@@ -81,29 +80,41 @@ export async function migrateData({ skipInvalid = false } = {}): Promise<boolean
   return true
 }
 
-// Run at bot startup; only reads. Unless 'ok', the bot must not start and one error was logged:
-// 'not-migrated' for unapplied Prisma migrations or a missing or older data version, 'unusable' for a
-// malformed record or one newer than DATA_VERSION.
-export async function checkData(): Promise<'ok' | 'not-migrated' | 'unusable'> {
+// Run at bot startup; only reads. Returns false (after logging one error) when the bot must not start:
+// unapplied Prisma migrations, a missing or older data version, or a malformed or newer record.
+export async function checkData(): Promise<boolean> {
   const path = recordFilePath()
   const record = readUsableRecord(path, 'refusing to start')
-  if (!record) return 'unusable'
+  if (!record) return false
 
   const problems: string[] = []
   const pending = await pendingMigrations()
   if (pending.length > 0) problems.push(`unapplied database migrations: ${pending.join(', ')}`)
   if (record.kind === 'none') problems.push(`no data version recorded in ${path}`)
   else if (record.version < DATA_VERSION) problems.push(`data version ${record.version} is older than ${DATA_VERSION}`)
-  if (problems.length === 0) return 'ok'
+  if (problems.length === 0) return true
 
   logger.error(`Data is not up to date (${problems.join('; ')}). ${MIGRATE_HINT}`)
-  return 'not-migrated'
+  return false
 }
 
-// Run by `pnpm migrate` before `prisma migrate deploy`, so a malformed record or one newer than
-// DATA_VERSION stops it before the database is touched. Only reads the record.
-export function preflightData(): boolean {
-  return readUsableRecord(recordFilePath(), 'nothing was changed') !== undefined
+// Run by `pnpm migrate` before `prisma migrate deploy`, so a malformed record, one newer than
+// DATA_VERSION, or (unless skipInvalid) an invalid asset file that migrateData would reject stops it
+// before the database is touched. Only reads.
+export function preflightData({ skipInvalid = false } = {}): boolean {
+  const record = readUsableRecord(recordFilePath(), 'nothing was changed')
+  if (!record) return false
+  if (skipInvalid || (record.kind === 'ok' && record.version === DATA_VERSION)) return true
+  const { invalid } = planAssets(assetConfigFiles(), record.kind === 'ok' ? record.version : 1, false)
+  if (invalid.length === 0) return true
+  logInvalidAssets(invalid, 'nothing was changed (the database was not migrated)')
+  return false
+}
+
+function logInvalidAssets(invalid: string[], outcome: string) {
+  logger.error(
+    `${invalid.length} asset files are not valid: ${invalid.join(', ')}; ${outcome}. Fix or remove them and run \`pnpm migrate\` again, or run \`pnpm migrate --skip-invalid\` to leave them unconverted`
+  )
 }
 
 // The record, or undefined (after logging an error ending in `outcome`) when it is malformed or newer
