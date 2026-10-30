@@ -44,7 +44,7 @@ export class AudioCache {
     this.logger = options.logger?.getSubLogger({ name: 'AudioCache' })
   }
 
-  public pathFor(provider: TTSProvider, text: string, lang: string, voice = ''): string {
+  private pathFor(provider: TTSProvider, text: string, lang: string, voice = ''): string {
     return `${this.dir}/${createHash('md5').update(`${provider.id}:${text}-${lang}-${voice}`).digest('hex')}.${EXTENSIONS[provider.format]}`
   }
 
