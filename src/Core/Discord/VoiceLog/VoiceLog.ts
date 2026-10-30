@@ -3,7 +3,6 @@ import type { Client, Member, VoiceChannel } from '@projectdysnomia/dysnomia'
 import { scheduleJob } from 'node-schedule'
 import type { ILogObj, Logger } from 'tslog'
 import { instances } from '../../../Utils/Instances'
-import { SerialQueue } from '../../../Utils/SerialQueue'
 import { ERR_DB_NOT_INIT } from '../../SQLite/Core'
 import type { DbServerConfigManager, IServerConfig } from '../../SQLite/db/ServerConfig'
 import type { Discord } from '../Core'
@@ -18,7 +17,10 @@ export class VoiceLog {
   private _logger: Logger<ILogObj>
   private _serverConfig: DbServerConfigManager
   private client: Client
-  private queue = new SerialQueue()
+  // Message and join/leave tasks run one at a time in order; a rejected task does not stop the ones after it
+  private queueTail: Promise<unknown> = Promise.resolve()
+  // Tasks added but not started yet
+  private queueLength = 0
   private continuousUser: { [key: string]: { user: string; timestamp: number } } = {}
 
   constructor(discord: Discord) {
@@ -40,7 +42,7 @@ export class VoiceLog {
 
       if (!data?.voiceMessageTTS.enabled) return
 
-      this.queue.add(async () => {
+      this.enqueue(async () => {
         const voice = this._voice.getCurrentVoice(guildId)
         if (voice?.channelId === message.channel.id) {
           const isContinuous = this.continuousUser[guildId]?.user === message.author.id && message.timestamp - this.continuousUser[guildId]?.timestamp < 5 * 1000
@@ -70,9 +72,9 @@ export class VoiceLog {
     this.client.on('voiceChannelJoin', async (member: Member, newChannel: VoiceChannel) => {
       if (member.id === this.client.user.id) return
       this.logger.debug(
-        `Queue (${this.queue.length + 1}): User ${member.username} (${member.id}) joined voice channel ${newChannel.name} (${newChannel.id}) in guild ${member.guild.name} (${member.guild.id})`
+        `Queue (${this.queueLength + 1}): User ${member.username} (${member.id}) joined voice channel ${newChannel.name} (${newChannel.id}) in guild ${member.guild.name} (${member.guild.id})`
       )
-      this.queue.add(async () => {
+      this.enqueue(async () => {
         this.logger.info(`User ${member.username} (${member.id}) joined voice channel ${newChannel.name} (${newChannel.id}) in guild ${member.guild.name} (${member.guild.id})`)
 
         const guildId = member.guild.id
@@ -101,9 +103,9 @@ export class VoiceLog {
     this.client.on('voiceChannelLeave', async (member: Member, oldChannel: VoiceChannel) => {
       if (member.id === this.client.user.id) return
       this.logger.debug(
-        `Queue (${this.queue.length + 1}): User ${member.username} (${member.id}) left voice channel ${oldChannel.name} (${oldChannel.id}) in guild ${member.guild.name} (${member.guild.id})`
+        `Queue (${this.queueLength + 1}): User ${member.username} (${member.id}) left voice channel ${oldChannel.name} (${oldChannel.id}) in guild ${member.guild.name} (${member.guild.id})`
       )
-      this.queue.add(async () => {
+      this.enqueue(async () => {
         this.logger.info(`User ${member.username} (${member.id}) left voice channel ${oldChannel.name} (${oldChannel.id}) in guild ${member.guild.name} (${member.guild.id})`)
 
         const guildId = member.guild.id
@@ -134,9 +136,9 @@ export class VoiceLog {
         return
       }
       this.logger.debug(
-        `Queue (${this.queue.length + 1}): User ${member.username} (${member.id}) switched voice channel from ${oldChannel.name} (${oldChannel.id}) to ${newChannel.name} (${newChannel.id}) in guild ${member.guild.name} (${member.guild.id})`
+        `Queue (${this.queueLength + 1}): User ${member.username} (${member.id}) switched voice channel from ${oldChannel.name} (${oldChannel.id}) to ${newChannel.name} (${newChannel.id}) in guild ${member.guild.name} (${member.guild.id})`
       )
-      this.queue.add(async () => {
+      this.enqueue(async () => {
         this.logger.info(
           `User ${member.username} (${member.id}) switched voice channel from ${oldChannel.name} (${oldChannel.id}) to ${newChannel.name} (${newChannel.id}) in guild ${member.guild.name} (${member.guild.id})`
         )
@@ -171,6 +173,16 @@ export class VoiceLog {
         }
       })
     })
+  }
+
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+    this.queueLength++
+    const run = this.queueTail.then(() => {
+      this.queueLength--
+      return task()
+    })
+    this.queueTail = run.catch(() => undefined)
+    return run
   }
 
   public get voice() {
