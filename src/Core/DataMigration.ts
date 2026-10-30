@@ -24,15 +24,8 @@ type VersionRecord = { kind: 'none' } | { kind: 'ok'; version: number } | { kind
 // running it again finishes the job. Returns false on failure.
 export async function migrateData(): Promise<boolean> {
   const path = recordFilePath()
-  const record = readRecord(path)
-  if (record.kind === 'invalid') {
-    logger.error(`${record.reason}; nothing was converted`)
-    return false
-  }
-  if (record.kind === 'ok' && record.version > DATA_VERSION) {
-    logger.error(`${path} says data version ${record.version}, newer than this build (${DATA_VERSION}); nothing was converted. Downgrades are not supported`)
-    return false
-  }
+  const record = readUsableRecord(path, 'nothing was converted')
+  if (!record) return false
   if (record.kind === 'ok' && record.version === DATA_VERSION) {
     logger.info(`Data is already at version ${DATA_VERSION}`)
     return true
@@ -82,15 +75,8 @@ export async function migrateData(): Promise<boolean> {
 // unapplied Prisma migrations, a data version older than DATA_VERSION, or an unusable record.
 export async function checkData(): Promise<boolean> {
   const path = recordFilePath()
-  const record = readRecord(path)
-  if (record.kind === 'invalid') {
-    logger.error(`${record.reason}; refusing to start`)
-    return false
-  }
-  if (record.kind === 'ok' && record.version > DATA_VERSION) {
-    logger.error(`${path} says data version ${record.version}, newer than this build (${DATA_VERSION}); refusing to start. Downgrades are not supported`)
-    return false
-  }
+  const record = readUsableRecord(path, 'refusing to start')
+  if (!record) return false
 
   const problems: string[] = []
   const pending = await pendingMigrations()
@@ -101,6 +87,21 @@ export async function checkData(): Promise<boolean> {
 
   logger.error(`Data is not up to date (${problems.join('; ')}). ${MIGRATE_HINT}`)
   return false
+}
+
+// The record, or undefined (after logging an error ending in `outcome`) when it is malformed or newer
+// than DATA_VERSION, which nothing in this build may act on
+function readUsableRecord(path: string, outcome: string) {
+  const record = readRecord(path)
+  if (record.kind === 'invalid') {
+    logger.error(`${record.reason}; ${outcome}`)
+    return undefined
+  }
+  if (record.kind === 'ok' && record.version > DATA_VERSION) {
+    logger.error(`${path} says data version ${record.version}, newer than this build (${DATA_VERSION}); ${outcome}. Downgrades are not supported`)
+    return undefined
+  }
+  return record
 }
 
 // Runs the steps from `from` to DATA_VERSION on every file and returns the ones that changed.
