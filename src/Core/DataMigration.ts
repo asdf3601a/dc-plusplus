@@ -1,9 +1,9 @@
 import { existsSync as exists, readdirSync as readDir, readFileSync as readFile } from 'node:fs'
-import { rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles, backupAssets } from '../Audio/AssetsMigration'
 import type { MemberConfig } from '../Audio/Audio'
 import { instances } from '../Utils/Instances'
+import { writeAtomic } from '../Utils/WriteAtomic'
 import { prisma } from './SQLite/Client'
 
 // Version of the app-side data format (assets/<id>.json). The database is versioned by Prisma's
@@ -177,15 +177,4 @@ async function pendingMigrations() {
   const applied = await prisma.$queryRawUnsafe<{ name: string }[]>('SELECT migration_name AS name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL')
   const appliedNames = new Set(applied.map((row) => row.name))
   return all.filter((name) => !appliedNames.has(name))
-}
-
-async function writeAtomic(path: string, data: string) {
-  const temp = `${path}.${process.pid}.tmp`
-  try {
-    await writeFile(temp, data)
-    await rename(temp, path)
-  } catch (error) {
-    await rm(temp, { force: true })
-    throw error
-  }
 }
