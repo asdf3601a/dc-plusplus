@@ -4,7 +4,6 @@ import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles, backupAssets } from '../Audi
 import type { MemberConfig } from '../Audio/Audio'
 import { instances } from '../Utils/Instances'
 import { writeAtomic } from '../Utils/WriteAtomic'
-import { prisma } from './SQLite/Client'
 
 // Version of the app-side data format (assets/<id>.json). The database is versioned by Prisma's
 // migration history instead. Bump it only for a breaking change, at most once per PR, and add exactly
@@ -94,6 +93,12 @@ export async function checkData(): Promise<'ok' | 'not-migrated' | 'unusable'> {
   return 'not-migrated'
 }
 
+// Run by `pnpm migrate` before `prisma migrate deploy`, so a malformed record or one newer than
+// DATA_VERSION stops it before the database is touched. Only reads the record.
+export function preflightData(): boolean {
+  return readUsableRecord(recordFilePath(), 'nothing was changed') !== undefined
+}
+
 // The record, or undefined (after logging an error ending in `outcome`) when it is malformed or newer
 // than DATA_VERSION, which nothing in this build may act on
 function readUsableRecord(path: string, outcome: string) {
@@ -178,6 +183,8 @@ async function pendingMigrations() {
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
   if (!exists(databasePath())) return all
+  // Loaded here: importing the client creates the database directory, which --preflight must not do
+  const { prisma } = await import('./SQLite/Client')
   const history = await prisma.$queryRawUnsafe<unknown[]>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_prisma_migrations'")
   if (history.length === 0) return all
   const applied = await prisma.$queryRawUnsafe<{ name: string }[]>('SELECT migration_name AS name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL')
