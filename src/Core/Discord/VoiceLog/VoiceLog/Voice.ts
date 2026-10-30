@@ -6,7 +6,6 @@ import type { CommandContext, MessageEmbedOptions } from 'slash-create'
 import type { ILogObj, Logger } from 'tslog'
 import { MEMBER_EVENTS, type TTSRequest } from '../../../../Audio/Audio'
 import { instances } from '../../../../Utils/Instances'
-import { SerialQueue } from '../../../../Utils/SerialQueue'
 import type { DbServerConfigManager } from '../../../SQLite/db/ServerConfig'
 import type { Discord } from '../../Core'
 import { DiscordVoice } from '../../Core/Voice'
@@ -130,29 +129,8 @@ export class VoiceLogVoice {
     await context?.send({ embeds: [progressMessage] })
     let progressCount = 0
     let progressTotal = 0
-    const queue = new SerialQueue()
-    const getTTS = (request: TTSRequest) => {
-      // biome-ignore lint/suspicious/noAsyncPromiseExecutor: Usage of await
-      return new Promise<void>(async (res) => {
-        progressCount++
-        const description = `${request.text} in ${request.lang}${request.voice ? ` with voice ${request.voice}` : ''}`
-        const progressField = {
-          name: '➡️ Processing texts...',
-          value: `(${progressCount}/${progressTotal}) ${description}`
-        }
-        progressMessage = this.genProgressMessage(title, [seekField, progressField])
-        await context?.editOriginal({ embeds: [progressMessage] })
-        instances.audio.synthesize(request).then((fileName) => {
-          this.logger.info(`(${progressCount}/${progressTotal}) ${description} -> ${fileName}`)
-          if (fileName !== null) ttsList.push(fileName)
-          setTimeout(() => {
-            res()
-          }, 500)
-        })
-      })
-    }
     const ttsList: string[] = []
-    for (const request of instances.audio.systemRequests()) queue.add(() => getTTS(request))
+    const requests: TTSRequest[] = [...instances.audio.systemRequests()]
     progressTotal += 2
     const files = readDir('assets/')
     files.forEach((file) => {
@@ -169,7 +147,7 @@ export class VoiceLogVoice {
           const request = instances.audio.memberRequest(config, type)
           if (!request) continue
           progressTotal++
-          queue.add(() => getTTS(request))
+          requests.push(request)
         }
       }
     })
@@ -178,41 +156,48 @@ export class VoiceLogVoice {
       name: `${seekDone ? '✅' : '➡️'} Seeking for files ...${seekDone ? ' Done' : ''}`,
       value: `${seekDone || seekCounter === 0 ? '' : `Current ${seekFilename}, `} Seeked ${seekCounter} files. `
     }
-    const afterWork = () => {
-      // biome-ignore lint/suspicious/noAsyncPromiseExecutor: Usage of await
-      return new Promise<void>(async (res) => {
-        const progressField = {
-          name: '✅ Processing files... Done',
-          value: `Processed ${progressTotal} texts.`
-        }
-        let cacheRemoveCount = 0
-        let cacheField = {
-          name: '➡️ Removing unused cache...',
-          value: cacheRemoveCount === 0 ? 'Seeking...' : `Removed ${cacheRemoveCount} unused ${cacheRemoveCount === 1 ? 'cache' : 'caches'}.`
-        }
+    for (const request of requests) {
+      progressCount++
+      const description = `${request.text} in ${request.lang}${request.voice ? ` with voice ${request.voice}` : ''}`
+      const progressField = {
+        name: '➡️ Processing texts...',
+        value: `(${progressCount}/${progressTotal}) ${description}`
+      }
+      progressMessage = this.genProgressMessage(title, [seekField, progressField])
+      await context?.editOriginal({ embeds: [progressMessage] })
+      const fileName = await instances.audio.synthesize(request)
+      this.logger.info(`(${progressCount}/${progressTotal}) ${description} -> ${fileName}`)
+      if (fileName !== null) ttsList.push(fileName)
+      await new Promise((res) => setTimeout(res, 500))
+    }
+    const progressField = {
+      name: '✅ Processing files... Done',
+      value: `Processed ${progressTotal} texts.`
+    }
+    let cacheRemoveCount = 0
+    let cacheField = {
+      name: '➡️ Removing unused cache...',
+      value: cacheRemoveCount === 0 ? 'Seeking...' : `Removed ${cacheRemoveCount} unused ${cacheRemoveCount === 1 ? 'cache' : 'caches'}.`
+    }
+    progressMessage = this.genProgressMessage(title, [seekField, progressField, cacheField])
+    await context?.editOriginal({ embeds: [progressMessage] })
+    const cacheFiles = readDir('caches/')
+    cacheFiles.forEach(async (file) => {
+      if (!ttsList.includes(`./caches/${file}`)) {
+        deleteFile(`./caches/${file}`)
+        this.logger.info(`Deleted unused file ./caches/${file}`)
+        cacheRemoveCount++
         progressMessage = this.genProgressMessage(title, [seekField, progressField, cacheField])
         await context?.editOriginal({ embeds: [progressMessage] })
-        const cacheFiles = readDir('caches/')
-        cacheFiles.forEach(async (file) => {
-          if (!ttsList.includes(`./caches/${file}`)) {
-            deleteFile(`./caches/${file}`)
-            this.logger.info(`Deleted unused file ./caches/${file}`)
-            cacheRemoveCount++
-            progressMessage = this.genProgressMessage(title, [seekField, progressField, cacheField])
-            await context?.editOriginal({ embeds: [progressMessage] })
-          }
-        })
-        cacheField = {
-          name: '✅ Removing unused cache... Done',
-          value: cacheRemoveCount === 0 ? 'No unused caches found.' : `Removed ${cacheRemoveCount} unused ${cacheRemoveCount === 1 ? 'cache' : 'caches'}.`
-        }
-        progressMessage = this.genProgressMessage('✅ Refresh Caches Done', [seekField, progressField, cacheField], true)
-        await context?.editOriginal({ embeds: [progressMessage] })
-        this.updateLock = false
-        res()
-      })
+      }
+    })
+    cacheField = {
+      name: '✅ Removing unused cache... Done',
+      value: cacheRemoveCount === 0 ? 'No unused caches found.' : `Removed ${cacheRemoveCount} unused ${cacheRemoveCount === 1 ? 'cache' : 'caches'}.`
     }
-    queue.add(() => afterWork())
+    progressMessage = this.genProgressMessage('✅ Refresh Caches Done', [seekField, progressField, cacheField], true)
+    await context?.editOriginal({ embeds: [progressMessage] })
+    this.updateLock = false
   }
 
   private genProgressMessage(title: string, fields: Array<{ name: string; value: string }>, isDone = false) {
