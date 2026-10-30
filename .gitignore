@@ -132,7 +132,7 @@ dist
 # project
 prisma/*.db
 prisma/*.db-journal
-assets/
+/assets/
 logs/
 caches/
 config*.json

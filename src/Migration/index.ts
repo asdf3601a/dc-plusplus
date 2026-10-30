@@ -1,9 +1,11 @@
+import { spawnSync } from 'node:child_process'
 import { existsSync as exists, readdirSync as readDir, readFileSync as readFile } from 'node:fs'
-import { dirname, resolve } from 'node:path'
-import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles, backupAssets } from '../Audio/AssetsMigration'
-import type { MemberConfig } from '../Audio/Audio'
 import { instances } from '../Utils/Instances'
 import { writeAtomic } from '../Utils/WriteAtomic'
+import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles } from './assets/steps'
+import { backupAssets } from './backup'
+import { importMongoDump, preflightMongoDump } from './import-mongo'
+import { databasePath, readRecord, recordFilePath, writeRecord } from './record'
 
 // Version of the app-side data format (assets/<id>.json). The database is versioned by Prisma's
 // migration history instead. Bump it only for a breaking change, at most once per PR, and add exactly
@@ -19,19 +21,39 @@ export const EXIT_DATA_CHECK_FAILED = 78
 // backup/ afterwards; the bot refuses to start while it exists
 export const MONGODB_DUMP_PATH = process.env.MONGODB_DUMP_PATH ?? './mongo_dump.json'
 
-const RECORD_FILE = 'data-version.json'
 const MIGRATIONS_DIR = 'prisma/migrations'
 const MIGRATE_HINT = '請先執行 `pnpm migrate`'
 
 const logger = instances.mainLogger.getSubLogger({ name: 'DataMigration' })
 
-type VersionRecord = { kind: 'none' } | { kind: 'ok'; version: number } | { kind: 'invalid'; reason: string }
+// `pnpm migrate`: checks the data version record and the assets (preflight), applies the database
+// migrations (`prisma migrate deploy`), imports the MongoDB dump at dumpPath if given, then upgrades the
+// app-side data. With preflight it stops after the check, having only read. Returns false on failure.
+export async function migrate({ preflight = false, skipInvalid = false, dumpPath }: { preflight?: boolean; skipInvalid?: boolean; dumpPath?: string }) {
+  if (!preflightData({ skipInvalid })) return false
+  if (dumpPath !== undefined && !preflightMongoDump(dumpPath)) return false
+  if (dumpPath === undefined && exists(MONGODB_DUMP_PATH)) {
+    instances.mainLogger.warn(`MongoDB dump ${MONGODB_DUMP_PATH} is not imported without --import-mongo; the bot refuses to start while it is there`)
+  }
+  if (preflight) return true
+  if (!deployDatabaseMigrations()) return false
+  if (dumpPath !== undefined && !(await importMongoDump(dumpPath))) return false
+  return migrateData({ skipInvalid })
+}
+
+// The Prisma CLI of this install, run with this node so it needs no shell or PATH entry
+function deployDatabaseMigrations() {
+  const result = spawnSync(process.execPath, [require.resolve('prisma/build/index.js'), 'migrate', 'deploy'], { stdio: 'inherit' })
+  if (result.status === 0) return true
+  instances.mainLogger.error(`prisma migrate deploy failed (${result.error ?? `exit ${result.status ?? result.signal}`}); the data was not upgraded`)
+  return false
+}
 
 // Run by `pnpm migrate` after `prisma migrate deploy`. Converts assets/<id>.json up to DATA_VERSION and
 // records the version only when every file was converted; otherwise the record is left as it was, so
 // running it again finishes the job. An asset file that is not a JSON object fails the run before
 // anything is converted, unless skipInvalid leaves such files as they are. Returns false on failure.
-export async function migrateData({ skipInvalid = false } = {}): Promise<boolean> {
+async function migrateData({ skipInvalid = false } = {}): Promise<boolean> {
   const path = recordFilePath()
   const record = readUsableRecord(path, 'nothing was converted')
   if (!record) return false
@@ -109,7 +131,7 @@ export async function checkData(): Promise<boolean> {
 // Run by `pnpm migrate` before `prisma migrate deploy`, so a malformed record, one newer than
 // DATA_VERSION, or (unless skipInvalid) an invalid asset file that migrateData would reject stops it
 // before the database is touched. Only reads.
-export function preflightData({ skipInvalid = false } = {}): boolean {
+function preflightData({ skipInvalid = false } = {}): boolean {
   const record = readUsableRecord(recordFilePath(), 'nothing was changed')
   if (!record) return false
   if (skipInvalid || (record.kind === 'ok' && record.version === DATA_VERSION)) return true
@@ -143,7 +165,7 @@ function readUsableRecord(path: string, outcome: string) {
 // Runs the steps from `from` to DATA_VERSION on every file and returns the ones that changed, and the
 // paths of files that are not a JSON object (each logged, never converted).
 function planAssets(files: string[], from: number, skipInvalid: boolean) {
-  const pending: { file: string; config: MemberConfig }[] = []
+  const pending: { file: string; config: Record<string, unknown> }[] = []
   const invalid: string[] = []
   const label = skipInvalid ? 'Skipping' : 'Invalid'
   for (const file of files) {
@@ -161,7 +183,7 @@ function planAssets(files: string[], from: number, skipInvalid: boolean) {
       invalid.push(path)
       continue
     }
-    let current = config as MemberConfig
+    let current = config as Record<string, unknown>
     let changed = false
     for (let version = from; version < DATA_VERSION; version++) {
       const step = ASSET_STEPS[version]
@@ -177,35 +199,6 @@ function planAssets(files: string[], from: number, skipInvalid: boolean) {
   return { pending, invalid }
 }
 
-// The record lives next to the SQLite database file
-function recordFilePath() {
-  return resolve(dirname(databasePath()), RECORD_FILE)
-}
-
-function databasePath() {
-  const url = instances.config.sqlite.databaseUrl
-  if (!url.startsWith('file:')) throw new Error(`Unsupported database URL ${url}`)
-  return resolve(url.slice('file:'.length).split('?')[0])
-}
-
-function readRecord(path: string): VersionRecord {
-  if (!exists(path)) return { kind: 'none' }
-  let version: unknown
-  try {
-    version = JSON.parse(readFile(path, { encoding: 'utf-8' }))?.version
-  } catch {
-    return { kind: 'invalid', reason: `${path} is not valid JSON` }
-  }
-  if (typeof version !== 'number' || !Number.isInteger(version) || version < 1) {
-    return { kind: 'invalid', reason: `${path} has no valid "version" (expected a positive integer, got ${JSON.stringify(version)})` }
-  }
-  return { kind: 'ok', version }
-}
-
-async function writeRecord(path: string, version: number) {
-  await writeAtomic(path, `${JSON.stringify({ version }, null, 2)}\n`)
-}
-
 // Migrations in prisma/migrations that the database has not finished applying. Never creates the
 // database file.
 async function pendingMigrations() {
@@ -214,7 +207,7 @@ async function pendingMigrations() {
     .map((entry) => entry.name)
   if (!exists(databasePath())) return all
   // Loaded here: importing the client creates the database directory, which --preflight must not do
-  const { prisma } = await import('./SQLite/Client')
+  const { prisma } = await import('../Core/SQLite/Client')
   const history = await prisma.$queryRawUnsafe<unknown[]>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_prisma_migrations'")
   if (history.length === 0) return all
   const applied = await prisma.$queryRawUnsafe<{ name: string }[]>('SELECT migration_name AS name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL')

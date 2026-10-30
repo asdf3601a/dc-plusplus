@@ -40,7 +40,7 @@ Since SQLite is a relational database, we flattened the MongoDB document structu
 - `prisma.config.ts`: Prisma CLI configuration (reads `databaseUrl` from `config.json`).
 - `src/Core/SQLite/Client.ts`: Prisma client instance with `@prisma/adapter-better-sqlite3`.
 - `src/Core/SQLite/Core.ts`: SQLite implementation of the database manager.
-- `src/Core/SQLite/Migration.ts`: Logic for migrating data from MongoDB dumps to SQLite.
+- `src/Migration/import-mongo.ts` (originally `src/Core/SQLite/Migration.ts`): Logic for migrating data from MongoDB dumps to SQLite.
 - `src/Core/SQLite/db/ServerConfig.ts`: Type definitions for the server configuration.
 
 ### 📁 Modified Files

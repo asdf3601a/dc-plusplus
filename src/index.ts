@@ -1,7 +1,7 @@
 import { Status } from 'status-client'
-import { checkData, EXIT_DATA_CHECK_FAILED } from './Core/DataMigration'
 import { Discord } from './Core/Discord/Core'
 import { SQLiteCore } from './Core/SQLite/Core'
+import { checkData, EXIT_DATA_CHECK_FAILED } from './Migration'
 import { instances } from './Utils/Instances'
 
 let quitting = false

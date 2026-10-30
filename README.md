@@ -34,7 +34,7 @@ The bot never migrates on its own: if the database has unapplied migrations, the
 
 ## Data version
 
-The database is versioned by Prisma's migration history (`prisma/migrations`). The app-side data, `assets/<User ID>.json`, has its own version, `DATA_VERSION` in `src/Core/DataMigration.ts` (currently `2`), recorded in `data-version.json` next to the database file (by default `prisma/data-version.json`), e.g. `{ "version": 2 }`.
+The database is versioned by Prisma's migration history (`prisma/migrations`). The app-side data, `assets/<User ID>.json`, has its own version, `DATA_VERSION` in `src/Migration/index.ts` (currently `2`), recorded in `data-version.json` next to the database file (by default `prisma/data-version.json`), e.g. `{ "version": 2 }`.
 
 `pnpm migrate` and the data version:
 - No record and no `assets/*.json`: a fresh install; the current version is recorded and nothing is converted.
@@ -44,7 +44,7 @@ The database is versioned by Prisma's migration history (`prisma/migrations`). T
 - Newer version (a downgrade) or a malformed record: an error is logged, nothing is changed (the database is not migrated either), `pnpm migrate` exits with code 1 and `pnpm start` with code 78.
 
 Rules for contributors:
-- Bump `DATA_VERSION` only for a breaking change to the assets format, at most once per PR, with exactly one step for the bump in `ASSET_STEPS` (`src/Audio/AssetsMigration.ts`).
+- Bump `DATA_VERSION` only for a breaking change to the assets format, at most once per PR, with exactly one step for the bump in `ASSET_STEPS` (`src/Migration/assets/steps.ts`).
 - Database changes go into a new Prisma migration. Never edit a released migration; this release adds `prisma/migrations/20261030120000_tts_provider`.
 
 ## Database Migration

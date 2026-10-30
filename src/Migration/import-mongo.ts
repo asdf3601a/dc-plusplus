@@ -1,7 +1,6 @@
-import { constants, existsSync as exists, mkdirSync as mkDir, readFileSync as readFile } from 'node:fs'
-import { copyFile, unlink } from 'node:fs/promises'
-import { BACKUP_DIR, backupTimestamp } from '../../Audio/AssetsMigration'
-import { instances } from '../../Utils/Instances'
+import { existsSync as exists, readFileSync as readFile } from 'node:fs'
+import { instances } from '../Utils/Instances'
+import { BACKUP_DIR, moveToBackup } from './backup'
 
 // MongoDB dumps store the TTS engine name, SQLite stores the provider id
 const MONGO_TTS_PROVIDERS = new Map([
@@ -108,8 +107,8 @@ export async function importMongoDump(dumpPath: string): Promise<boolean> {
     return false
   }
   // Loaded here: importing the client creates the database directory, which --preflight must not do
-  const { prisma } = await import('./Client')
-  const { DEFAULT_TTS_PROVIDER } = await import('./db/ServerConfig')
+  const { prisma } = await import('../Core/SQLite/Client')
+  const { DEFAULT_TTS_PROVIDER } = await import('../Core/SQLite/db/ServerConfig')
 
   logger.info(`Found ${rows.length} documents in ${dumpPath}. Migrating to SQLite...`)
   const upserts = rows.map(({ serverID, ttsType, ...fields }) => {
@@ -138,19 +137,10 @@ export async function importMongoDump(dumpPath: string): Promise<boolean> {
   logger.info('MongoDB dump migration completed!')
 
   try {
-    logger.info(`Moved ${dumpPath} to ${await moveToBackup(dumpPath)}`)
+    logger.info(`Moved ${dumpPath} to ${await moveToBackup(dumpPath, 'mongo_dump')}`)
     return true
   } catch (error) {
     logger.error(`The dump was imported, but moving ${dumpPath} to ${BACKUP_DIR}/ failed; move it away yourself (running \`pnpm migrate --import-mongo\` again is safe):`, error)
     return false
   }
-}
-
-// Copies first so an existing backup is never overwritten, then removes the original
-async function moveToBackup(dumpPath: string) {
-  mkDir(BACKUP_DIR, { recursive: true })
-  const target = `${BACKUP_DIR}/mongo_dump-${backupTimestamp()}.json`
-  await copyFile(dumpPath, target, constants.COPYFILE_EXCL)
-  await unlink(dumpPath)
-  return target
 }
