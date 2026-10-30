@@ -1,7 +1,7 @@
-import { readFileSync as readFile, unlinkSync as unlink } from 'node:fs'
+import { constants, existsSync as exists, mkdirSync as mkDir, readFileSync as readFile } from 'node:fs'
+import { copyFile, unlink } from 'node:fs/promises'
+import { BACKUP_DIR, backupTimestamp } from '../../Audio/AssetsMigration'
 import { instances } from '../../Utils/Instances'
-import { prisma } from './Client'
-import { DEFAULT_TTS_PROVIDER } from './db/ServerConfig'
 
 // MongoDB dumps store the TTS engine name, SQLite stores the provider id
 const MONGO_TTS_PROVIDERS = new Map([
@@ -9,80 +9,148 @@ const MONGO_TTS_PROVIDERS = new Map([
   ['Legacy', 'google-translate']
 ])
 
-export async function migrateMongoToSqlite(dumpPath: string) {
-  const logger = instances.mainLogger.getSubLogger({ name: 'DBMigrate' })
+const logger = instances.mainLogger.getSubLogger({ name: 'DBMigrate' })
+
+// A serverConfig row read from the dump; ttsType is the MongoDB engine name, mapped to a provider on import
+interface DumpRow {
+  serverID: string
+  lang: string
+  channelID: string
+  lastVoiceChannel: string
+  currentVoiceChannel: string
+  ttsEnabled: boolean
+  ttsMessageLang: string
+  ttsType: string | undefined
+  ttsVoiceLang: string
+  ttsVoiceName: string
+}
+
+// Throws, naming the first bad document, unless the whole dump parses and every field has the right type
+function readMongoDump(dumpPath: string): DumpRow[] {
+  const rawData = readFile(dumpPath, { encoding: 'utf-8' }).trim()
+  let documents: unknown
+  if (rawData.startsWith('[')) {
+    documents = JSON.parse(rawData)
+  } else if (rawData.includes('\n')) {
+    documents = rawData
+      .split('\n')
+      .filter((line) => line.trim())
+      .map((line) => JSON.parse(line))
+  } else {
+    documents = JSON.parse(rawData)
+  }
+
+  // Handle both array of docs or mongoexport object format
+  const dataArray: unknown[] = Array.isArray(documents) ? documents : [documents]
+  return dataArray.map((doc, index) => toRow(doc, `Document ${index + 1}`))
+}
+
+// Missing or null fields get the defaults; any other value of the wrong type is an error
+function toRow(doc: unknown, name: string): DumpRow {
+  if (!isObject(doc) || typeof doc.serverID !== 'string' || doc.serverID === '') {
+    throw new Error(`${name} has no serverID: ${JSON.stringify(doc)}`)
+  }
+  const where = `${name} (serverID ${doc.serverID})`
+  const tts = doc.voiceMessageTTS ?? {}
+  if (!isObject(tts)) throw new Error(`${where}: voiceMessageTTS is ${JSON.stringify(tts)}, expected an object`)
+  const enabled = tts.enabled ?? false
+  if (typeof enabled !== 'boolean') throw new Error(`${where}: voiceMessageTTS.enabled is ${JSON.stringify(enabled)}, expected a boolean`)
+  const type = tts.type ?? undefined
+  if (type !== undefined && typeof type !== 'string') throw new Error(`${where}: voiceMessageTTS.type is ${JSON.stringify(type)}, expected a string`)
+  return {
+    serverID: doc.serverID,
+    lang: stringField(doc, 'lang', 'en_US', where),
+    channelID: stringField(doc, 'channelID', '', where),
+    lastVoiceChannel: stringField(doc, 'lastVoiceChannel', '', where),
+    currentVoiceChannel: stringField(doc, 'currentVoiceChannel', '', where),
+    ttsEnabled: enabled,
+    ttsMessageLang: stringField(tts, 'messageLang', 'en_US', where, 'voiceMessageTTS.'),
+    ttsType: type,
+    ttsVoiceLang: stringField(tts, 'voiceLang', 'en-US', where, 'voiceMessageTTS.'),
+    ttsVoiceName: stringField(tts, 'voiceName', 'en-US-Wavenet-A', where, 'voiceMessageTTS.')
+  }
+}
+
+function stringField(object: Record<string, unknown>, key: string, fallback: string, where: string, prefix = '') {
+  const value = object[key] ?? fallback
+  if (typeof value !== 'string') throw new Error(`${where}: ${prefix}${key} is ${JSON.stringify(value)}, expected a string`)
+  return value
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+// Run by `pnpm migrate --import-mongo` before `prisma migrate deploy`: the dump exists and every document
+// is valid. Only reads.
+export function preflightMongoDump(dumpPath: string): boolean {
+  if (!exists(dumpPath)) {
+    logger.error(`MongoDB dump ${dumpPath} not found; nothing was changed`)
+    return false
+  }
+  try {
+    readMongoDump(dumpPath)
+    return true
+  } catch (error) {
+    logger.error(`MongoDB dump ${dumpPath} is not valid; nothing was changed:`, error)
+    return false
+  }
+}
+
+// Upserts every document by serverID in one transaction, so a failure writes nothing and running it again
+// is safe, then moves the dump to backup/mongo_dump-<YYYYMMDD-HHmmss>.json. Returns false on failure.
+export async function importMongoDump(dumpPath: string): Promise<boolean> {
+  let rows: DumpRow[]
+  try {
+    rows = readMongoDump(dumpPath)
+  } catch (error) {
+    logger.error(`MongoDB dump ${dumpPath} is not valid; nothing was imported:`, error)
+    return false
+  }
+  // Loaded here: importing the client creates the database directory, which --preflight must not do
+  const { prisma } = await import('./Client')
+  const { DEFAULT_TTS_PROVIDER } = await import('./db/ServerConfig')
+
+  logger.info(`Found ${rows.length} documents in ${dumpPath}. Migrating to SQLite...`)
+  const upserts = rows.map(({ serverID, ttsType, ...fields }) => {
+    let ttsProvider = DEFAULT_TTS_PROVIDER
+    if (ttsType !== undefined) {
+      const mapped = MONGO_TTS_PROVIDERS.get(ttsType)
+      if (mapped) {
+        ttsProvider = mapped
+      } else {
+        logger.warn(`Guild ${serverID} has unknown TTS type "${ttsType}"; migrating to the default provider ${DEFAULT_TTS_PROVIDER}`)
+      }
+    }
+    const dbObject = { ...fields, ttsProvider }
+    return prisma.serverConfig.upsert({
+      where: { serverID },
+      update: dbObject,
+      create: { serverID, ...dbObject }
+    })
+  })
+  try {
+    await prisma.$transaction(upserts)
+  } catch (error) {
+    logger.error('MongoDB dump migration failed; nothing was imported:', error)
+    return false
+  }
+  logger.info('MongoDB dump migration completed!')
 
   try {
-    logger.info(`Reading MongoDB dump from: ${dumpPath}...`)
-    const rawData = readFile(dumpPath, { encoding: 'utf-8' }).trim()
-    let documents: unknown
-    if (rawData.startsWith('[')) {
-      documents = JSON.parse(rawData)
-    } else if (rawData.includes('\n')) {
-      documents = rawData
-        .split('\n')
-        .filter((line) => line.trim())
-        .map((line) => JSON.parse(line))
-    } else {
-      documents = JSON.parse(rawData)
-    }
-
-    // Handle both array of docs or mongoexport object format
-    const dataArray = Array.isArray(documents) ? documents : [documents]
-
-    logger.info(`Found ${dataArray.length} documents. Migrating to SQLite...`)
-
-    for (const doc of dataArray) {
-      if (!doc?.serverID) {
-        logger.warn(`Skipping document without serverID: ${JSON.stringify(doc)}`)
-        continue
-      }
-
-      const tts = {
-        enabled: false,
-        messageLang: 'en_US',
-        voiceLang: 'en-US',
-        voiceName: 'en-US-Wavenet-A',
-        ...doc.voiceMessageTTS
-      }
-      let ttsProvider = DEFAULT_TTS_PROVIDER
-      if (typeof tts.type === 'string') {
-        const mapped = MONGO_TTS_PROVIDERS.get(tts.type)
-        if (mapped) {
-          ttsProvider = mapped
-        } else {
-          logger.warn(`Guild ${doc.serverID} has unknown TTS type "${tts.type}"; migrating to the default provider ${DEFAULT_TTS_PROVIDER}`)
-        }
-      }
-
-      const dbObject = {
-        lang: doc.lang ?? 'en_US',
-        channelID: doc.channelID ?? '',
-        lastVoiceChannel: doc.lastVoiceChannel ?? '',
-        currentVoiceChannel: doc.currentVoiceChannel ?? '',
-        ttsEnabled: tts.enabled ?? false,
-        ttsMessageLang: tts.messageLang ?? 'en_US',
-        ttsProvider,
-        ttsVoiceLang: tts.voiceLang ?? 'en-US',
-        ttsVoiceName: tts.voiceName ?? 'en-US-Wavenet-A'
-      }
-      await prisma.serverConfig.upsert({
-        where: { serverID: doc.serverID },
-        update: dbObject,
-        create: {
-          serverID: doc.serverID,
-          ...dbObject
-        }
-      })
-    }
-    logger.info('MongoDB dump migration completed!')
-    try {
-      unlink(dumpPath)
-    } catch (unlinkError: unknown) {
-      logger.warn(`Failed to delete MongoDB dump file at ${dumpPath}:`, unlinkError)
-    }
+    logger.info(`Moved ${dumpPath} to ${await moveToBackup(dumpPath)}`)
+    return true
   } catch (error) {
-    logger.error('MongoDB dump migration failed:', error)
-    throw error
+    logger.error(`The dump was imported, but moving ${dumpPath} to ${BACKUP_DIR}/ failed; move it away yourself (running \`pnpm migrate --import-mongo\` again is safe):`, error)
+    return false
   }
+}
+
+// Copies first so an existing backup is never overwritten, then removes the original
+async function moveToBackup(dumpPath: string) {
+  mkDir(BACKUP_DIR, { recursive: true })
+  const target = `${BACKUP_DIR}/mongo_dump-${backupTimestamp()}.json`
+  await copyFile(dumpPath, target, constants.COPYFILE_EXCL)
+  await unlink(dumpPath)
+  return target
 }

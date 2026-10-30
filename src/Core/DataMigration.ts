@@ -15,8 +15,8 @@ export const DATA_VERSION = 2
 // pm2 does not restart into the same error.
 export const EXIT_DATA_CHECK_FAILED = 78
 
-// A MongoDB export to import into SQLite; `pnpm migrate` imports and then deletes it, and the bot refuses
-// to start while it exists
+// Default MongoDB export to import into SQLite with `pnpm migrate --import-mongo`, which moves it to
+// backup/ afterwards; the bot refuses to start while it exists
 export const MONGODB_DUMP_PATH = process.env.MONGODB_DUMP_PATH ?? './mongo_dump.json'
 
 const RECORD_FILE = 'data-version.json'
@@ -97,10 +97,12 @@ export async function checkData(): Promise<boolean> {
   if (pending.length > 0) problems.push(`unapplied database migrations: ${pending.join(', ')}`)
   if (record.kind === 'none') problems.push(`no data version recorded in ${path}`)
   else if (record.version < DATA_VERSION) problems.push(`data version ${record.version} is older than ${DATA_VERSION}`)
-  if (exists(MONGODB_DUMP_PATH)) problems.push(`MongoDB dump ${MONGODB_DUMP_PATH} not imported yet`)
+  const dump = exists(MONGODB_DUMP_PATH)
+  if (dump) problems.push(`MongoDB dump ${MONGODB_DUMP_PATH} not imported yet`)
   if (problems.length === 0) return true
 
-  logger.error(`Data is not up to date (${problems.join('; ')}). ${MIGRATE_HINT}`)
+  const hint = dump ? `請先執行 \`pnpm migrate --import-mongo\`，或將 ${MONGODB_DUMP_PATH} 移走` : MIGRATE_HINT
+  logger.error(`Data is not up to date (${problems.join('; ')}). ${hint}`)
   return false
 }
 

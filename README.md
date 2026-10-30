@@ -27,10 +27,10 @@
 ## Upgrading
 
 1. Stop the bot and back up the database file (by default `prisma/voice-log.db`). Database migrations are **not** backed up automatically.
-2. Run `pnpm migrate`. It first checks the data version record and the assets, and stops before touching the database if the record is malformed or newer than the code or an asset file is invalid (see below). It then applies pending database migrations (`prisma migrate deploy`), imports a MongoDB dump if one is present (see [Database Migration](#database-migration)), and upgrades `assets/<User ID>.json` to the current [data version](#data-version). Running it again changes nothing.
+2. Run `pnpm migrate`. It first checks the data version record and the assets, and stops before touching the database if the record is malformed or newer than the code or an asset file is invalid (see below). It then applies pending database migrations (`prisma migrate deploy`), imports a MongoDB dump if you pass `--import-mongo` (see [Database Migration](#database-migration)), and upgrades `assets/<User ID>.json` to the current [data version](#data-version). Running it again changes nothing.
 3. Run `pnpm start`.
 
-The bot never migrates on its own: if the database has unapplied migrations, the data version is older than the code's, or a MongoDB dump is waiting to be imported, it logs ``請先執行 `pnpm migrate` `` and exits with code 78. It also exits with code 78, after logging an error, when the data version record is malformed or newer than the code. pm2 does not restart the bot on code 78 (`stop_exit_codes` in `ecosystem.config.js`). `pm2 deploy` runs `pnpm migrate` in its post-deploy step before reloading the bot.
+The bot never migrates on its own: if the database has unapplied migrations, the data version is older than the code's, or a MongoDB dump is waiting to be imported, it logs ``請先執行 `pnpm migrate` `` (for the dump: run `pnpm migrate --import-mongo` or move the file away) and exits with code 78. It also exits with code 78, after logging an error, when the data version record is malformed or newer than the code. pm2 does not restart the bot on code 78 (`stop_exit_codes` in `ecosystem.config.js`). `pm2 deploy` runs `pnpm migrate` in its post-deploy step before reloading the bot.
 
 ## Data version
 
@@ -49,18 +49,18 @@ Rules for contributors:
 
 ## Database Migration
 
-If you are upgrading from an older version that used MongoDB, please refer to the [Migration Guide](docs/migration/MONGODB_TO_SQLITE_MIGRATION.md) to move your data to SQLite. In short: put the `mongoexport` dump at `./mongo_dump.json` (or set `MONGODB_DUMP_PATH` for both `pnpm migrate` and `pnpm start`) and run `pnpm migrate`, which imports it into SQLite and deletes it. `pnpm start` refuses to start (exit code 78) while the dump file is present.
+If you are upgrading from an older version that used MongoDB, please refer to the [Migration Guide](docs/migration/MONGODB_TO_SQLITE_MIGRATION.md) to move your data to SQLite. In short: put the `mongoexport` dump at `./mongo_dump.json` (or set `MONGODB_DUMP_PATH`) and run `pnpm migrate --import-mongo` (or `pnpm migrate --import-mongo <path>`). It imports every document in one transaction, so an invalid dump imports nothing, then moves the dump to `backup/mongo_dump-<YYYYMMDD-HHmmss>.json`. `pnpm migrate` without `--import-mongo` never imports. `pnpm start` refuses to start (exit code 78) while the dump file is present.
 
 ## Voice Activity Sound
 
- For the voice activity sound, put the following file into `asset/` folder:
+ For the voice activity sound, put the following file into `assets/` folder:
 ```
 <User ID>_join.wav --Connected to the channel
 <User ID>_left.wav --Left the channel
 <User ID>_switched_out.wav --Switched out from the channel
 <User ID>_switched_in.wav --Switched into the channel
 ```
-or place `<User ID>.json` into `asset/` folder with:
+or place `<User ID>.json` into `assets/` folder with:
 ```json
 {
   "provider": "google-translate",

@@ -1,42 +1,45 @@
 // Entry point of `pnpm migrate`: checks the data version record and the assets (preflight), applies the
-// database migrations (`prisma migrate deploy`), imports a MongoDB dump if there is one, then upgrades
-// the app-side data. Running the steps from here, not from the package.json script, passes options such
-// as --skip-invalid to all of them. With --preflight it stops after the check.
+// database migrations (`prisma migrate deploy`), imports a MongoDB dump with --import-mongo [path], then
+// upgrades the app-side data. Running the steps from here, not from the package.json script, passes
+// options such as --skip-invalid to all of them. With --preflight it stops after the check.
 import { spawnSync } from 'node:child_process'
 import { existsSync as exists } from 'node:fs'
 import { MONGODB_DUMP_PATH, migrateData, preflightData } from './Core/DataMigration'
+import { importMongoDump, preflightMongoDump } from './Core/SQLite/Migration'
 import { instances } from './Utils/Instances'
 
-const OPTIONS = ['--preflight', '--skip-invalid']
+const OPTIONS = ['--preflight', '--skip-invalid', '--import-mongo [path]']
 
 async function run() {
   // `pnpm migrate -- --skip-invalid` passes the "--" through
   const args = process.argv.slice(2).filter((arg) => arg !== '--')
-  const unknown = args.filter((arg) => !OPTIONS.includes(arg))
+  const flags = new Set<string>()
+  const unknown: string[] = []
+  let dumpPath: string | undefined
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]
+    if (arg === '--import-mongo') {
+      dumpPath = args[i + 1] !== undefined && !args[i + 1].startsWith('--') ? args[++i] : MONGODB_DUMP_PATH
+    } else if (arg === '--preflight' || arg === '--skip-invalid') {
+      flags.add(arg)
+    } else {
+      unknown.push(arg)
+    }
+  }
   if (unknown.length > 0) {
     instances.mainLogger.error(`Unknown option ${unknown.join(', ')} (available: ${OPTIONS.join(', ')})`)
     return false
   }
-  const skipInvalid = args.includes('--skip-invalid')
+  const skipInvalid = flags.has('--skip-invalid')
   if (!preflightData({ skipInvalid })) return false
-  if (args.includes('--preflight')) return true
-  if (!deployDatabaseMigrations()) return false
-  if (!(await importMongoDump())) return false
-  return migrateData({ skipInvalid })
-}
-
-// Upserts every document of the dump into SQLite and deletes the dump on success
-async function importMongoDump() {
-  if (!exists(MONGODB_DUMP_PATH)) return true
-  // Loaded here: importing it creates the database directory, which --preflight must not do
-  const { migrateMongoToSqlite } = await import('./Core/SQLite/Migration')
-  try {
-    await migrateMongoToSqlite(MONGODB_DUMP_PATH)
-    return true
-  } catch {
-    // migrateMongoToSqlite logged the error
-    return false
+  if (dumpPath !== undefined && !preflightMongoDump(dumpPath)) return false
+  if (dumpPath === undefined && exists(MONGODB_DUMP_PATH)) {
+    instances.mainLogger.warn(`MongoDB dump ${MONGODB_DUMP_PATH} is not imported without --import-mongo; the bot refuses to start while it is there`)
   }
+  if (flags.has('--preflight')) return true
+  if (!deployDatabaseMigrations()) return false
+  if (dumpPath !== undefined && !(await importMongoDump(dumpPath))) return false
+  return migrateData({ skipInvalid })
 }
 
 // The Prisma CLI of this install, run with this node so it needs no shell or PATH entry
