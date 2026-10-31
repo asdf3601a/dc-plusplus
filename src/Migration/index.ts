@@ -24,6 +24,8 @@ export const EXIT_DATA_CHECK_FAILED = 78
 export const MONGODB_DUMP_PATH = process.env.MONGODB_DUMP_PATH ?? './mongo_dump.json'
 
 const MIGRATIONS_DIR = 'prisma/migrations'
+// Rewrites existing rows (ttsType -> ttsProvider); unmapped values are logged before it runs
+const TTS_PROVIDER_MIGRATION = '20261030120000_tts_provider'
 const MIGRATE_HINT = '請先執行 `pnpm migrate`'
 
 const logger = instances.mainLogger.getSubLogger({ name: 'DataMigration' })
@@ -66,6 +68,7 @@ export async function migrate({
   logger.info(`To migrate: ${reasons.join('; ')}`)
   const run: RunState = { yolo }
   if (!(await backupData({ yolo, dumpPath, backupDir: backupDir ?? BACKUP_DIR, run }))) return false
+  await logUnmappedTTSTypes()
   if (!deployDatabaseMigrations()) return failed(run)
   if (dumpPath !== undefined && !(await importMongoDump(dumpPath))) {
     logger.error('The database migrations of this run were applied; assets/*.json and data-version.json were not changed')
@@ -158,6 +161,20 @@ async function backupData({ yolo, dumpPath, backupDir, run }: { yolo: boolean; d
   } catch (error) {
     logger.error('Backup failed; nothing was changed. Fix the problem and run `pnpm migrate` again, or run `pnpm migrate --yolo` to migrate without a backup:', error)
     return false
+  }
+}
+
+// Before the tts_provider migration converts existing rows, logs every guild whose ttsType it maps to
+// the default provider because it is neither WaveNet nor Legacy
+async function logUnmappedTTSTypes() {
+  if (!exists(databasePath()) || !(await pendingMigrations()).includes(TTS_PROVIDER_MIGRATION)) return
+  const { prisma } = await import('../Core/SQLite/Client')
+  const table = await prisma.$queryRawUnsafe<unknown[]>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'serverConfig'")
+  if (table.length === 0) return
+  const { DEFAULT_TTS_PROVIDER } = await import('../Core/SQLite/db/ServerConfig')
+  const rows = await prisma.$queryRawUnsafe<{ serverID: string; ttsType: string }[]>("SELECT serverID, ttsType FROM serverConfig WHERE ttsType NOT IN ('WaveNet', 'Legacy')")
+  for (const row of rows) {
+    logger.warn(`Guild ${row.serverID} has unknown TTS type "${row.ttsType}"; migrating to the default provider ${DEFAULT_TTS_PROVIDER}`)
   }
 }
 
