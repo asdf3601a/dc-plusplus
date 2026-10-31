@@ -32,8 +32,9 @@ const logger = instances.mainLogger.getSubLogger({ name: 'DataMigration' })
 type RunState = { yolo: boolean; backupDir?: string }
 
 // `pnpm migrate`: checks the data version record and the assets (preflight), waits until no other
-// connection holds the database locked, backs up what it will change (unless yolo) to a new directory in
-// backupDir, applies the database migrations (`prisma migrate deploy`), imports the MongoDB dump at
+// connection holds the database locked, and stops there, changing nothing and making no backup, when
+// there is nothing to migrate (see backupReasons). Otherwise backs up what it will change (unless yolo)
+// to a new directory in backupDir, applies the database migrations (`prisma migrate deploy`), imports the MongoDB dump at
 // dumpPath if given, then upgrades the app-side data. With preflight it stops after the check, having only
 // read. Returns false on failure, after saying what was changed and how to restore the backup.
 export async function migrate({
@@ -41,7 +42,7 @@ export async function migrate({
   skipInvalid = false,
   yolo = false,
   dumpPath,
-  backupDir = BACKUP_DIR
+  backupDir
 }: {
   preflight?: boolean
   skipInvalid?: boolean
@@ -56,8 +57,19 @@ export async function migrate({
   }
   if (preflight) return true
   if (!(await databaseUnlocked('nothing was changed'))) return false
+  const reasons = await backupReasons(dumpPath)
+  if (reasons.length === 0) {
+    const unused = [...(yolo ? ['--yolo'] : []), ...(backupDir !== undefined ? ['--backup-dir'] : [])]
+    if (unused.length > 0) {
+      logger.error(`Nothing to migrate, so no backup is made and ${unused.join(' and ')} cannot be used; nothing was changed`)
+      return false
+    }
+    logger.info(`Nothing to migrate (database migrations applied, data version ${DATA_VERSION}, no MongoDB dump); no backup was made`)
+    return true
+  }
+  logger.info(`To migrate: ${reasons.join('; ')}`)
   const run: RunState = { yolo }
-  if (!(await backupData({ yolo, dumpPath, backupDir, run }))) return false
+  if (!(await backupData({ yolo, dumpPath, backupDir: backupDir ?? BACKUP_DIR, run }))) return false
   if (!deployDatabaseMigrations()) return failed(run)
   if (dumpPath !== undefined && !(await importMongoDump(dumpPath))) {
     logger.error('The database migrations of this run were applied; assets/*.json and data-version.json were not changed')
@@ -110,7 +122,25 @@ async function databaseUnlocked(outcome: string) {
   return false
 }
 
-// Run by `pnpm migrate` after the preflight, before anything is changed. Unless yolo (then it only warns),
+// What this `pnpm migrate` run has to migrate, from the three things that decide it: unapplied Prisma
+// migrations, a data version record that is missing or older than DATA_VERSION, and a MongoDB dump (the
+// one given to --import-mongo, or else the default one if it is there). Empty when there is nothing to
+// migrate, the only case in which `pnpm migrate` makes no backup.
+async function backupReasons(dumpPath?: string) {
+  const reasons: string[] = []
+  const pending = await pendingMigrations()
+  if (pending.length > 0) reasons.push(`unapplied database migrations: ${pending.join(', ')}`)
+  // preflightData already rejected a malformed or newer record
+  const record = readRecord(recordFilePath())
+  if (record.kind !== 'ok') reasons.push('no data version recorded')
+  else if (record.version < DATA_VERSION) reasons.push(`data version ${record.version} is older than ${DATA_VERSION}`)
+  const dump = dumpPath ?? MONGODB_DUMP_PATH
+  if (exists(dump)) reasons.push(`MongoDB dump ${dump}`)
+  return reasons
+}
+
+// Run by `pnpm migrate` after the preflight, before anything is changed, when there is something to
+// migrate. Unless yolo (then it only warns),
 // backs up all the data: the database, every file in assets/, the record and the MongoDB dump (the one
 // given to --import-mongo, deleted after the import, or else the default one if it is there), whatever
 // this run changes. Makes no backup when none of
