@@ -103,7 +103,7 @@ If you want to use the new google cloud text to speech, be sure to have apiKey i
 ```
 `lang` and `voice` available from https://cloud.google.com/text-to-speech/docs/voices
 
-Files in the old format (`"use_wave_tts": true` / `false` or missing instead of `provider`) are converted by `pnpm migrate` when upgrading to [data version](#data-version) 2: `"use_wave_tts": true` with a `voice` becomes `"provider": "google-cloud"`; anything else (`false`, missing, or `true` without a `voice`) becomes `"provider": "google-translate"`, matching how it actually behaved before. Files that already have `provider` keep it. Files added later must use `provider`; files without a usable `provider` are skipped with an error.
+Files in the old format (`use_wave_tts` instead of `provider`) are converted by `pnpm migrate` when upgrading to [data version](#data-version) 2; see the [TTS provider migration guide](docs/migration/TTS_PROVIDER_MIGRATION.md). Files added later must use `provider`; files without a usable `provider` are skipped with an error.
 
 Example:
 
