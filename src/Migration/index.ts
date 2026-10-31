@@ -111,8 +111,9 @@ async function databaseUnlocked(outcome: string) {
 }
 
 // Run by `pnpm migrate` after the preflight, before anything is changed. Unless yolo (then it only warns),
-// backs up all the data: the database, every file in assets/, the record and the dump given to
-// --import-mongo (deleted after the import), whatever this run changes. Makes no backup when none of
+// backs up all the data: the database, every file in assets/, the record and the MongoDB dump (the one
+// given to --import-mongo, deleted after the import, or else the default one if it is there), whatever
+// this run changes. Makes no backup when none of
 // them exists yet (a fresh install). Returns false, having changed nothing, when the backup fails.
 async function backupData({ yolo, dumpPath, backupDir, run }: { yolo: boolean; dumpPath?: string; backupDir: string; run: RunState }) {
   if (yolo) {
@@ -120,7 +121,10 @@ async function backupData({ yolo, dumpPath, backupDir, run }: { yolo: boolean; d
     return true
   }
   const database = databasePath()
-  const files = [recordFilePath(), ...(dumpPath !== undefined ? [dumpPath] : [])]
+  // Without --import-mongo the default dump is kept only if it is there, so restoring never deletes one
+  // that was put in place later
+  const dump = dumpPath ?? (exists(MONGODB_DUMP_PATH) ? MONGODB_DUMP_PATH : undefined)
+  const files = [recordFilePath(), ...(dump !== undefined ? [dump] : [])]
   if (!exists(database) && !exists(ASSETS_DIR) && !files.some((file) => exists(file))) return true
   // preflightData already rejected a malformed or newer record
   const record = readRecord(recordFilePath())
