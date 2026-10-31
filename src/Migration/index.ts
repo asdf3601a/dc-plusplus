@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync as exists, readdirSync as readDir, readFileSync as readFile } from 'node:fs'
 import { resolve } from 'node:path'
+import { EXIT_NO_RESTART } from '../Utils/ExitCode'
 import { instances } from '../Utils/Instances'
 import { writeAtomic } from '../Utils/WriteAtomic'
 import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles } from './assets/steps'
@@ -13,11 +14,6 @@ import { databaseLock, failedMigrations } from './sqlite'
 // migration history instead. Bump it only for a breaking change, at most once per PR, and add exactly
 // one step for the bump to ASSET_STEPS.
 export const DATA_VERSION = 2
-
-// Exit code of the bot when the startup data check fails: not migrated yet, or a malformed or newer
-// data version record (EX_CONFIG in sysexits.h). ecosystem.config.js lists it in stop_exit_codes so
-// pm2 does not restart into the same error.
-export const EXIT_DATA_CHECK_FAILED = 78
 
 // MongoDB export that `pnpm migrate` imports into SQLite whenever it exists (set MONGODB_DUMP_PATH for
 // another path), deleting it afterwards; the bot refuses to start while it exists
@@ -352,13 +348,13 @@ function planAssets(files: string[], from: number, skipInvalid: boolean) {
 }
 
 // Migrations in prisma/migrations that the database has not finished applying. Never creates the
-// database file. Exits with EXIT_DATA_CHECK_FAILED when prisma/migrations is missing.
+// database file. Exits with EXIT_NO_RESTART when prisma/migrations is missing.
 async function pendingMigrations() {
   if (!exists(MIGRATIONS_DIR)) {
     logger.error(
       `${resolve(MIGRATIONS_DIR)} not found, so the database migrations cannot be checked; nothing was changed. Run it from the project directory, or restore ${MIGRATIONS_DIR} (\`git checkout -- ${MIGRATIONS_DIR}\`)`
     )
-    process.exit(EXIT_DATA_CHECK_FAILED)
+    process.exit(EXIT_NO_RESTART)
   }
   const all = readDir(MIGRATIONS_DIR, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())

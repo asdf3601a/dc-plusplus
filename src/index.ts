@@ -1,7 +1,8 @@
 import { Status } from 'status-client'
 import { Discord } from './Core/Discord/Core'
 import { SQLiteCore } from './Core/SQLite/Core'
-import { checkData, EXIT_DATA_CHECK_FAILED } from './Migration'
+import { checkData } from './Migration'
+import { EXIT_NO_RESTART } from './Utils/ExitCode'
 import { instances } from './Utils/Instances'
 
 let quitting = false
@@ -13,7 +14,7 @@ if (instances.config.debug) instances.mainLogger.settings.minLevel = 0 // Silly
 const status = new Status('VoiceLog')
 
 async function main() {
-  if (!(await checkData())) process.exit(EXIT_DATA_CHECK_FAILED)
+  if (!(await checkData())) process.exit(EXIT_NO_RESTART)
 
   // Initialize SQLite
   const db = new SQLiteCore()
