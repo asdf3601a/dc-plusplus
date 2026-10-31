@@ -59,22 +59,21 @@ If you have an existing MongoDB database and want to move the data to the new SQ
    mongoexport --uri="mongodb://localhost:27017/VoiceLog" --collection=serverConfig --out=mongo_dump.json
    ```
 
-   Place the resulting `mongo_dump.json` file in the project root directory, `pnpm migrate --import-mongo` first copies it (with the database file, if one exists, and `assets/`) to `backup/<YYYYMMDD-HHmmss-SSS>/`, and deletes it after importing. With `--yolo` no backup is made: keep a copy elsewhere.
+   Place the resulting `mongo_dump.json` file in the project root directory. `pnpm migrate` first copies it (with the database file, if one exists, and `assets/`) to `backup/<YYYYMMDD-HHmmss-SSS>/`, and deletes it after importing. With `--yolo` no backup is made: keep a copy elsewhere.
 
 5. **Run Data Migration**:
-   Run `pnpm migrate --import-mongo`. It checks that the dump parses and that every field has the right type, creates the SQLite database (or applies pending migrations), imports every document of `mongo_dump.json` in one transaction, deletes the dump, and then upgrades the rest of the data. Before changing anything it backs up the dump, the database file and `assets/` to `backup/<YYYYMMDD-HHmmss-SSS>/` (see [Backups](../../README.md#backups) for what is copied and how to restore it with `pnpm migrate --restore <path>`); if the backup fails it exits with an error before changing anything, and `pnpm migrate --import-mongo --yolo` skips the backup:
+   Run `pnpm migrate`. When it finds the dump, it checks that the dump parses and that every field has the right type, creates the SQLite database (or applies pending migrations), imports every document of `mongo_dump.json` in one transaction, deletes the dump, and then upgrades the rest of the data. Before changing anything it backs up the dump, the database file and `assets/` to `backup/<YYYYMMDD-HHmmss-SSS>/` (see [Backups](../UPGRADING.md#backups) for what is copied and how to restore it with `pnpm migrate --restore <path>`); if the backup fails it exits with an error before changing anything, and `pnpm migrate --yolo` skips the backup:
 
    ```bash
-   pnpm migrate --import-mongo
+   pnpm migrate
    ```
 
-   Without `--import-mongo`, `pnpm migrate` never imports the dump. If the dump is invalid or the import fails, `pnpm migrate` exits with an error, nothing is imported and the dump stays where it is; fix the problem and run it again. Documents are upserted by `serverID`, so running it again with the same dump is safe. If only deleting the dump fails, the data is already imported: move the dump away yourself. The bot never imports the dump on its own: while the dump file is present, `pnpm start` logs an error asking you to run `pnpm migrate --import-mongo` (or move the file away) and exits with code 78.
+   If the dump is invalid or the import fails, `pnpm migrate` exits with an error, nothing is imported and the dump stays where it is; fix the problem and run it again. Documents are upserted by `serverID`, so running it again with the same dump is safe. If only deleting the dump fails, the data is already imported: move the dump away yourself. After a successful import the dump is gone, so the next `pnpm migrate` has nothing to import and makes no backup for it. The bot never imports the dump on its own: while the dump file is present, `pnpm start` logs an error asking you to run `pnpm migrate` and exits with code 78.
 
-   *Note: If your dump file has a different name or location, pass its path to `--import-mongo`, or set `MONGODB_DUMP_PATH` for both `pnpm migrate` and `pnpm start`:*
+   *Note: If your dump file has a different name or location, set `MONGODB_DUMP_PATH` for both `pnpm migrate` and `pnpm start`:*
 
    ```bash
-   pnpm migrate --import-mongo ./my_custom_dump.json
-   MONGODB_DUMP_PATH="./my_custom_dump.json" pnpm migrate --import-mongo
+   MONGODB_DUMP_PATH="./my_custom_dump.json" pnpm migrate
    ```
 
 6. **Verification**:
