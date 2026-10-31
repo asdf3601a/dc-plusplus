@@ -1,11 +1,13 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync as exists, readdirSync as readDir, readFileSync as readFile } from 'node:fs'
+import { resolve } from 'node:path'
 import { instances } from '../Utils/Instances'
 import { writeAtomic } from '../Utils/WriteAtomic'
 import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles } from './assets/steps'
-import { backup } from './backup'
+import { BACKUP_DIR, backup, RestoreError, restore } from './backup'
 import { importMongoDump, preflightMongoDump } from './import-mongo'
 import { databasePath, readRecord, recordFilePath, writeRecord } from './record'
+import { databaseLock, failedMigrations } from './sqlite'
 
 // Version of the app-side data format (assets/<id>.json). The database is versioned by Prisma's
 // migration history instead. Bump it only for a breaking change, at most once per PR, and add exactly
@@ -23,25 +25,29 @@ export const MONGODB_DUMP_PATH = process.env.MONGODB_DUMP_PATH ?? './mongo_dump.
 
 const MIGRATIONS_DIR = 'prisma/migrations'
 const MIGRATE_HINT = '請先執行 `pnpm migrate`'
-const DEPLOY_FAILED_HINT =
-  'A failed database migration is rolled back and leaves the database as it was, but Prisma keeps it recorded as failed (P3018 on the failing run, P3009 on every later one). Fix the cause shown by the P3018 error, run `pnpm exec prisma migrate resolve --rolled-back <migration name>` with the name printed above, then run `pnpm migrate` again'
 
 const logger = instances.mainLogger.getSubLogger({ name: 'DataMigration' })
 
-// `pnpm migrate`: checks the data version record and the assets (preflight), backs up what it will change
-// (unless yolo), applies the database migrations (`prisma migrate deploy`), imports the MongoDB dump at
+// What a `pnpm migrate` run has done so far, for the message on a failure
+type RunState = { yolo: boolean; backupDir?: string }
+
+// `pnpm migrate`: checks the data version record and the assets (preflight), waits until no other
+// connection holds the database locked, backs up what it will change (unless yolo) to a new directory in
+// backupDir, applies the database migrations (`prisma migrate deploy`), imports the MongoDB dump at
 // dumpPath if given, then upgrades the app-side data. With preflight it stops after the check, having only
-// read. Returns false on failure.
+// read. Returns false on failure, after saying what was changed and how to restore the backup.
 export async function migrate({
   preflight = false,
   skipInvalid = false,
   yolo = false,
-  dumpPath
+  dumpPath,
+  backupDir = BACKUP_DIR
 }: {
   preflight?: boolean
   skipInvalid?: boolean
   yolo?: boolean
   dumpPath?: string
+  backupDir?: string
 }) {
   if (!preflightData({ skipInvalid })) return false
   if (dumpPath !== undefined && !preflightMongoDump(dumpPath)) return false
@@ -49,30 +55,80 @@ export async function migrate({
     instances.mainLogger.warn(`MongoDB dump ${MONGODB_DUMP_PATH} is not imported without --import-mongo; the bot refuses to start while it is there`)
   }
   if (preflight) return true
-  if (!(await backupData({ yolo, dumpPath }))) return false
-  if (!deployDatabaseMigrations()) return false
-  if (dumpPath !== undefined && !(await importMongoDump(dumpPath))) return false
-  return migrateData({ skipInvalid })
+  if (!(await databaseUnlocked('nothing was changed'))) return false
+  const run: RunState = { yolo }
+  if (!(await backupData({ yolo, dumpPath, backupDir, run }))) return false
+  if (!deployDatabaseMigrations()) return failed(run)
+  if (dumpPath !== undefined && !(await importMongoDump(dumpPath))) {
+    logger.error('The database migrations of this run were applied; assets/*.json and data-version.json were not changed')
+    return failed(run)
+  }
+  return (await migrateData({ skipInvalid })) || failed(run)
 }
 
-// Run by `pnpm migrate` after the preflight, before anything is changed. Backs up only what this run
-// changes: the database if it has pending migrations or the dump is imported into it, assets/*.json and
-// the record if the data version is older, and the dump (deleted after the import). With yolo it only
-// warns. Returns false, having changed nothing, when the backup fails.
-async function backupData({ yolo, dumpPath }: { yolo: boolean; dumpPath?: string }) {
+// Logs how to undo a run that failed after it started changing data; returns false
+function failed({ yolo, backupDir }: RunState) {
+  if (backupDir !== undefined) logger.error(`To undo this run, stop the bot and run \`pnpm migrate --restore ${backupDir}\` (the backup made before it changed anything)`)
+  else if (yolo) logger.error('No backup was made (--yolo); restore your own backup to undo this run')
+  else logger.error('No backup was made: this run found no existing data to change')
+  return false
+}
+
+// `pnpm migrate --restore <dir>`: puts the data in the backup at dir back (see restore in backup.ts),
+// after backing up the data it replaces to a new directory in backupDir. Does not migrate. Returns false,
+// after saying what was changed, on failure.
+export async function restoreBackup({ dir, backupDir = BACKUP_DIR }: { dir: string; backupDir?: string }) {
+  if (!(await databaseUnlocked('nothing was restored'))) return false
+  try {
+    const { manifest, replaced } = await restore(dir, { baseDir: backupDir, dataVersion: currentDataVersion() })
+    logger.info(`Restored ${dir} (made ${manifest.createdAt} by version ${manifest.appVersion}, data version ${manifest.dataVersion ?? 'none'})`)
+    logger.info(`The data from before the restore is in ${replaced}; run \`pnpm migrate --restore ${replaced}\` to go back to it`)
+    logger.info('Nothing was migrated: run `pnpm migrate` to upgrade the restored data (the bot refuses to start until then), or run the version of the bot that matches it')
+    return true
+  } catch (error) {
+    if (error instanceof RestoreError) logger.error(error.message)
+    else logger.error(`Restoring ${dir} failed:`, error)
+    return false
+  }
+}
+
+function currentDataVersion() {
+  const record = readRecord(recordFilePath())
+  return record.kind === 'ok' ? record.version : null
+}
+
+// Waits a few seconds for another connection to release the database; if it does not, logs what holds
+// it (ending in outcome) and returns false. True when there is no database yet.
+async function databaseUnlocked(outcome: string) {
+  const path = databasePath()
+  if (!exists(path)) return true
+  const holder = await databaseLock(path, (attempt, tries, waitMs) => {
+    logger.warn(`The database ${path} is locked; trying again in ${waitMs / 1000} s (${attempt}/${tries})`)
+  })
+  if (holder === undefined) return true
+  logger.error(`The database ${path} is still locked: ${holder}; ${outcome}. Close that connection and run it again`)
+  return false
+}
+
+// Run by `pnpm migrate` after the preflight, before anything is changed. Unless yolo (then it only warns),
+// backs up all the data: the database, every file in assets/, the record and the dump given to
+// --import-mongo (deleted after the import), whatever this run changes. Makes no backup when none of
+// them exists yet (a fresh install). Returns false, having changed nothing, when the backup fails.
+async function backupData({ yolo, dumpPath, backupDir, run }: { yolo: boolean; dumpPath?: string; backupDir: string; run: RunState }) {
   if (yolo) {
     logger.warn('--yolo: no backup was made')
     return true
   }
   const database = databasePath()
-  const changesDatabase = exists(database) && (dumpPath !== undefined || (await pendingMigrations()).length > 0)
+  const files = [recordFilePath(), ...(dumpPath !== undefined ? [dumpPath] : [])]
+  if (!exists(database) && !exists(ASSETS_DIR) && !files.some((file) => exists(file))) return true
   // preflightData already rejected a malformed or newer record
   const record = readRecord(recordFilePath())
-  const assets = record.kind === 'ok' && record.version === DATA_VERSION ? [] : assetConfigFiles()
-  const files = [...(assets.length > 0 && record.kind === 'ok' ? [recordFilePath()] : []), ...(dumpPath !== undefined ? [dumpPath] : [])]
-  if (!changesDatabase && assets.length === 0 && files.length === 0) return true
   try {
-    logger.info(`Backed up to ${await backup({ database: changesDatabase ? database : undefined, assets, files })}`)
+    // A path that does not exist (no database or record yet) is recorded as absent, so restoring
+    // deletes the one this run creates
+    run.backupDir = await backup({ database, dirs: [ASSETS_DIR], files, baseDir: backupDir, reason: 'migrate', dataVersion: record.kind === 'ok' ? record.version : null })
+    logger.info(`Backed up to ${resolve(run.backupDir)}; to undo this run, stop the bot and run \`pnpm migrate --restore ${run.backupDir}\``)
     return true
   } catch (error) {
     logger.error('Backup failed; nothing was changed. Fix the problem and run `pnpm migrate` again, or run `pnpm migrate --yolo` to migrate without a backup:', error)
@@ -80,14 +136,37 @@ async function backupData({ yolo, dumpPath }: { yolo: boolean; dumpPath?: string
   }
 }
 
-// The Prisma CLI of this install, run with this node so it needs no shell or PATH entry
+// The Prisma CLI of this install, run with this node so it needs no shell or PATH entry. On a failure,
+// logs what state it left the database in.
 function deployDatabaseMigrations() {
   const result = spawnSync(process.execPath, [require.resolve('prisma/build/index.js'), 'migrate', 'deploy'], { stdio: 'inherit' })
   if (result.status === 0) return true
-  instances.mainLogger.error(`prisma migrate deploy failed (${result.error ?? `exit ${result.status ?? result.signal}`}); the data was not upgraded`)
-  // Every migration runs in one transaction, so a failed one changed nothing but stays recorded as failed
-  if (!result.error) instances.mainLogger.error(DEPLOY_FAILED_HINT)
+  logger.error(
+    `prisma migrate deploy failed (${result.error ?? `exit ${result.status ?? result.signal}`}); ${databaseStateAfterFailure()}; assets/*.json and data-version.json were not changed`
+  )
   return false
+}
+
+// What a failed `prisma migrate deploy` left: the migration Prisma recorded as failed, and whether its
+// SQL runs in a transaction (BEGIN ... COMMIT), so that its changes were rolled back
+function databaseStateAfterFailure() {
+  let failedNames: string[]
+  try {
+    failedNames = failedMigrations(databasePath())
+  } catch (error) {
+    return `the state of the database is unknown (${error instanceof Error ? error.message : error})`
+  }
+  if (failedNames.length === 0) return 'no migration was recorded as failed, so Prisma stopped before changing the database'
+  const states = failedNames.map((name) => {
+    const file = `${MIGRATIONS_DIR}/${name}/migration.sql`
+    const sql = exists(file) ? readFile(file, { encoding: 'utf-8' }) : ''
+    const transactional = /^BEGIN( TRANSACTION)?;/m.test(sql) && /^COMMIT;/m.test(sql)
+    return transactional
+      ? `migration ${name} failed and its changes were rolled back (it runs in a transaction)`
+      : `migration ${name} failed and does not run in a transaction, so the database may be partly changed`
+  })
+  const resolveHint = failedNames.map((name) => `\`pnpm prisma migrate resolve --rolled-back ${name}\``).join(', ')
+  return `${states.join('; ')}; migrations before it stay applied. Prisma refuses to deploy again until you restore the backup, or fix the problem and run ${resolveHint}`
 }
 
 // Run by `pnpm migrate` after `prisma migrate deploy`. Converts assets/<id>.json up to DATA_VERSION and

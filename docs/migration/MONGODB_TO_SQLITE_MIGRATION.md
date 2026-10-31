@@ -59,10 +59,10 @@ If you have an existing MongoDB database and want to move the data to the new SQ
    mongoexport --uri="mongodb://localhost:27017/VoiceLog" --collection=serverConfig --out=mongo_dump.json
    ```
 
-   Place the resulting `mongo_dump.json` file in the project root directory, `pnpm migrate --import-mongo` first copies it (and the database file, if one exists) to `backup/<YYYYMMDD-HHmmss>/`, and deletes it after importing. With `--yolo` no backup is made: keep a copy elsewhere.
+   Place the resulting `mongo_dump.json` file in the project root directory, `pnpm migrate --import-mongo` first copies it (with the database file, if one exists, and `assets/`) to `backup/<YYYYMMDD-HHmmss-SSS>/`, and deletes it after importing. With `--yolo` no backup is made: keep a copy elsewhere.
 
 5. **Run Data Migration**:
-   Run `pnpm migrate --import-mongo`. It checks that the dump parses and that every field has the right type, creates the SQLite database (or applies pending migrations), imports every document of `mongo_dump.json` in one transaction, deletes the dump, and then upgrades the rest of the data. Before changing anything it backs up the dump, the database file and the old `assets/*.json` to `backup/<YYYYMMDD-HHmmss>/` (see [Backups](../../README.md#backups) for what is copied and how to restore); if the backup fails it exits with an error before changing anything, and `pnpm migrate --import-mongo --yolo` skips the backup:
+   Run `pnpm migrate --import-mongo`. It checks that the dump parses and that every field has the right type, creates the SQLite database (or applies pending migrations), imports every document of `mongo_dump.json` in one transaction, deletes the dump, and then upgrades the rest of the data. Before changing anything it backs up the dump, the database file and `assets/` to `backup/<YYYYMMDD-HHmmss-SSS>/` (see [Backups](../../README.md#backups) for what is copied and how to restore it with `pnpm migrate --restore <path>`); if the backup fails it exits with an error before changing anything, and `pnpm migrate --import-mongo --yolo` skips the backup:
 
    ```bash
    pnpm migrate --import-mongo

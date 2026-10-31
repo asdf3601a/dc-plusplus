@@ -1,32 +1,52 @@
-// Entry point of `pnpm migrate`: parses the options and runs the migration (see Migration/index.ts).
-// Running it from here, not from the package.json script, passes options such as --skip-invalid to
-// every step.
-import { MONGODB_DUMP_PATH, migrate } from './Migration'
+// Entry point of `pnpm migrate`: parses the options and runs the migration (see Migration/index.ts), or
+// with --restore puts a backup back. Running it from here, not from the package.json script, passes
+// options such as --skip-invalid to every step.
+import { MONGODB_DUMP_PATH, migrate, restoreBackup } from './Migration'
 import { instances } from './Utils/Instances'
 
-const OPTIONS = ['--preflight', '--skip-invalid', '--yolo', '--import-mongo [path]']
+const OPTIONS = ['--preflight', '--skip-invalid', '--yolo', '--import-mongo [path]', '--backup-dir <path>', '--restore <path>']
+// Options that make no sense with --restore, which only puts a backup back
+const NOT_WITH_RESTORE = ['--preflight', '--skip-invalid', '--yolo', '--import-mongo']
 
 async function run() {
   // `pnpm migrate -- --skip-invalid` passes the "--" through
   const args = process.argv.slice(2).filter((arg) => arg !== '--')
   const flags = new Set<string>()
-  const unknown: string[] = []
+  const problems: string[] = []
   let dumpPath: string | undefined
+  let backupDir: string | undefined
+  let restoreDir: string | undefined
+  const value = (i: number) => (args[i + 1] !== undefined && !args[i + 1].startsWith('--') ? args[i + 1] : undefined)
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (arg === '--import-mongo') {
-      dumpPath = args[i + 1] !== undefined && !args[i + 1].startsWith('--') ? args[++i] : MONGODB_DUMP_PATH
+      flags.add(arg)
+      dumpPath = value(i) ?? MONGODB_DUMP_PATH
+      if (value(i) !== undefined) i++
+    } else if (arg === '--backup-dir' || arg === '--restore') {
+      const path = value(i)
+      if (path === undefined) problems.push(`${arg} needs a path`)
+      else i++
+      if (arg === '--backup-dir') backupDir = path
+      else restoreDir = path
+      flags.add(arg)
     } else if (arg === '--preflight' || arg === '--skip-invalid' || arg === '--yolo') {
       flags.add(arg)
     } else {
-      unknown.push(arg)
+      problems.push(`Unknown option ${arg}`)
     }
   }
-  if (unknown.length > 0) {
-    instances.mainLogger.error(`Unknown option ${unknown.join(', ')} (available: ${OPTIONS.join(', ')})`)
+  if (flags.has('--restore')) {
+    const conflicting = NOT_WITH_RESTORE.filter((flag) => flags.has(flag))
+    if (conflicting.length > 0) problems.push(`--restore cannot be used with ${conflicting.join(', ')}`)
+  }
+  if (flags.has('--yolo') && flags.has('--backup-dir')) problems.push('--yolo makes no backup, so it cannot be used with --backup-dir')
+  if (problems.length > 0) {
+    instances.mainLogger.error(`${problems.join('; ')} (available: ${OPTIONS.join(', ')}); nothing was changed`)
     return false
   }
-  return migrate({ preflight: flags.has('--preflight'), skipInvalid: flags.has('--skip-invalid'), yolo: flags.has('--yolo'), dumpPath })
+  if (restoreDir !== undefined) return restoreBackup({ dir: restoreDir, backupDir })
+  return migrate({ preflight: flags.has('--preflight'), skipInvalid: flags.has('--skip-invalid'), yolo: flags.has('--yolo'), dumpPath, backupDir })
 }
 
 run()
