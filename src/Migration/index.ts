@@ -352,8 +352,14 @@ function planAssets(files: string[], from: number, skipInvalid: boolean) {
 }
 
 // Migrations in prisma/migrations that the database has not finished applying. Never creates the
-// database file.
+// database file. Exits with EXIT_DATA_CHECK_FAILED when prisma/migrations is missing.
 async function pendingMigrations() {
+  if (!exists(MIGRATIONS_DIR)) {
+    logger.error(
+      `${resolve(MIGRATIONS_DIR)} not found, so the database migrations cannot be checked; nothing was changed. Run it from the project directory, or restore ${MIGRATIONS_DIR} (\`git checkout -- ${MIGRATIONS_DIR}\`)`
+    )
+    process.exit(EXIT_DATA_CHECK_FAILED)
+  }
   const all = readDir(MIGRATIONS_DIR, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
