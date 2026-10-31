@@ -1,29 +1,24 @@
 // Entry point of `pnpm migrate`: parses the options and runs the migration (see Migration/index.ts), or
 // with --restore puts a backup back. Running it from here, not from the package.json script, passes
 // options such as --skip-invalid to every step.
-import { MONGODB_DUMP_PATH, migrate, restoreBackup } from './Migration'
+import { migrate, restoreBackup } from './Migration'
 import { instances } from './Utils/Instances'
 
-const OPTIONS = ['--preflight', '--skip-invalid', '--yolo', '--import-mongo [path]', '--backup-dir <path>', '--restore <path>']
+const OPTIONS = ['--preflight', '--skip-invalid', '--yolo', '--backup-dir <path>', '--restore <path>']
 // Options that make no sense with --restore, which only puts a backup back
-const NOT_WITH_RESTORE = ['--preflight', '--skip-invalid', '--yolo', '--import-mongo']
+const NOT_WITH_RESTORE = ['--preflight', '--skip-invalid', '--yolo']
 
 async function run() {
   // `pnpm migrate -- --skip-invalid` passes the "--" through
   const args = process.argv.slice(2).filter((arg) => arg !== '--')
   const flags = new Set<string>()
   const problems: string[] = []
-  let dumpPath: string | undefined
   let backupDir: string | undefined
   let restoreDir: string | undefined
   const value = (i: number) => (args[i + 1] !== undefined && !args[i + 1].startsWith('--') ? args[i + 1] : undefined)
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
-    if (arg === '--import-mongo') {
-      flags.add(arg)
-      dumpPath = value(i) ?? MONGODB_DUMP_PATH
-      if (value(i) !== undefined) i++
-    } else if (arg === '--backup-dir' || arg === '--restore') {
+    if (arg === '--backup-dir' || arg === '--restore') {
       const path = value(i)
       if (path === undefined) problems.push(`${arg} needs a path`)
       else i++
@@ -46,7 +41,7 @@ async function run() {
     return false
   }
   if (restoreDir !== undefined) return restoreBackup({ dir: restoreDir, backupDir })
-  return migrate({ preflight: flags.has('--preflight'), skipInvalid: flags.has('--skip-invalid'), yolo: flags.has('--yolo'), dumpPath, backupDir })
+  return migrate({ preflight: flags.has('--preflight'), skipInvalid: flags.has('--skip-invalid'), yolo: flags.has('--yolo'), backupDir })
 }
 
 run()

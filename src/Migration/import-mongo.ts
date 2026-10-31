@@ -80,8 +80,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-// Run by `pnpm migrate --import-mongo` before `prisma migrate deploy`: the dump exists and every document
-// is valid. Only reads.
+// Run by `pnpm migrate` before `prisma migrate deploy` when there is a dump: the dump exists and every
+// document is valid. Only reads.
 export function preflightMongoDump(dumpPath: string): boolean {
   if (!exists(dumpPath)) {
     logger.error(`MongoDB dump ${dumpPath} not found; nothing was changed`)
@@ -141,7 +141,7 @@ export async function importMongoDump(dumpPath: string): Promise<boolean> {
     logger.info(`Deleted ${dumpPath}`)
     return true
   } catch (error) {
-    logger.error(`The dump was imported, but deleting ${dumpPath} failed; move it away yourself (running \`pnpm migrate --import-mongo\` again is safe):`, error)
+    logger.error(`The dump was imported, but deleting ${dumpPath} failed; move it away yourself (running \`pnpm migrate\` again is safe):`, error)
     return false
   }
 }

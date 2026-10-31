@@ -19,8 +19,8 @@ export const DATA_VERSION = 2
 // pm2 does not restart into the same error.
 export const EXIT_DATA_CHECK_FAILED = 78
 
-// Default MongoDB export to import into SQLite with `pnpm migrate --import-mongo`, which deletes it
-// afterwards; the bot refuses to start while it exists
+// MongoDB export that `pnpm migrate` imports into SQLite whenever it exists (set MONGODB_DUMP_PATH for
+// another path), deleting it afterwards; the bot refuses to start while it exists
 export const MONGODB_DUMP_PATH = process.env.MONGODB_DUMP_PATH ?? './mongo_dump.json'
 
 const MIGRATIONS_DIR = 'prisma/migrations'
@@ -35,26 +35,22 @@ type RunState = { yolo: boolean; backupDir?: string }
 // connection holds the database locked, and stops there, changing nothing and making no backup, when
 // there is nothing to migrate (see backupReasons). Otherwise backs up what it will change (unless yolo)
 // to a new directory in backupDir, applies the database migrations (`prisma migrate deploy`), imports the MongoDB dump at
-// dumpPath if given, then upgrades the app-side data. With preflight it stops after the check, having only
+// MONGODB_DUMP_PATH if it exists, then upgrades the app-side data. With preflight it stops after the check, having only
 // read. Returns false on failure, after saying what was changed and how to restore the backup.
 export async function migrate({
   preflight = false,
   skipInvalid = false,
   yolo = false,
-  dumpPath,
   backupDir
 }: {
   preflight?: boolean
   skipInvalid?: boolean
   yolo?: boolean
-  dumpPath?: string
   backupDir?: string
 }) {
+  const dumpPath = exists(MONGODB_DUMP_PATH) ? MONGODB_DUMP_PATH : undefined
   if (!preflightData({ skipInvalid })) return false
   if (dumpPath !== undefined && !preflightMongoDump(dumpPath)) return false
-  if (dumpPath === undefined && exists(MONGODB_DUMP_PATH)) {
-    instances.mainLogger.warn(`MongoDB dump ${MONGODB_DUMP_PATH} is not imported without --import-mongo; the bot refuses to start while it is there`)
-  }
   if (preflight) return true
   if (!(await databaseUnlocked('nothing was changed'))) return false
   const reasons = await backupReasons(dumpPath)
@@ -123,9 +119,9 @@ async function databaseUnlocked(outcome: string) {
 }
 
 // What this `pnpm migrate` run has to migrate, from the three things that decide it: unapplied Prisma
-// migrations, a data version record that is missing or older than DATA_VERSION, and a MongoDB dump (the
-// one given to --import-mongo, or else the default one if it is there). Empty when there is nothing to
-// migrate, the only case in which `pnpm migrate` makes no backup.
+// migrations, a data version record that is missing or older than DATA_VERSION, and a MongoDB dump at
+// dumpPath to import. Empty when there is nothing to migrate, the only case in which `pnpm migrate` makes
+// no backup.
 async function backupReasons(dumpPath?: string) {
   const reasons: string[] = []
   const pending = await pendingMigrations()
@@ -134,16 +130,14 @@ async function backupReasons(dumpPath?: string) {
   const record = readRecord(recordFilePath())
   if (record.kind !== 'ok') reasons.push('no data version recorded')
   else if (record.version < DATA_VERSION) reasons.push(`data version ${record.version} is older than ${DATA_VERSION}`)
-  const dump = dumpPath ?? MONGODB_DUMP_PATH
-  if (exists(dump)) reasons.push(`MongoDB dump ${dump}`)
+  if (dumpPath !== undefined) reasons.push(`MongoDB dump ${dumpPath}`)
   return reasons
 }
 
 // Run by `pnpm migrate` after the preflight, before anything is changed, when there is something to
 // migrate. Unless yolo (then it only warns),
-// backs up all the data: the database, every file in assets/, the record and the MongoDB dump (the one
-// given to --import-mongo, deleted after the import, or else the default one if it is there), whatever
-// this run changes. Makes no backup when none of
+// backs up all the data: the database, every file in assets/, the record and the MongoDB dump at dumpPath
+// (deleted after the import), whatever this run changes. Makes no backup when none of
 // them exists yet (a fresh install). Returns false, having changed nothing, when the backup fails.
 async function backupData({ yolo, dumpPath, backupDir, run }: { yolo: boolean; dumpPath?: string; backupDir: string; run: RunState }) {
   if (yolo) {
@@ -151,10 +145,7 @@ async function backupData({ yolo, dumpPath, backupDir, run }: { yolo: boolean; d
     return true
   }
   const database = databasePath()
-  // Without --import-mongo the default dump is kept only if it is there, so restoring never deletes one
-  // that was put in place later
-  const dump = dumpPath ?? (exists(MONGODB_DUMP_PATH) ? MONGODB_DUMP_PATH : undefined)
-  const files = [recordFilePath(), ...(dump !== undefined ? [dump] : [])]
+  const files = [recordFilePath(), ...(dumpPath !== undefined ? [dumpPath] : [])]
   if (!exists(database) && !exists(ASSETS_DIR) && !files.some((file) => exists(file))) return true
   // preflightData already rejected a malformed or newer record
   const record = readRecord(recordFilePath())
@@ -265,12 +256,10 @@ export async function checkData(): Promise<boolean> {
   if (pending.length > 0) problems.push(`unapplied database migrations: ${pending.join(', ')}`)
   if (record.kind === 'none') problems.push(`no data version recorded in ${path}`)
   else if (record.version < DATA_VERSION) problems.push(`data version ${record.version} is older than ${DATA_VERSION}`)
-  const dump = exists(MONGODB_DUMP_PATH)
-  if (dump) problems.push(`MongoDB dump ${MONGODB_DUMP_PATH} not imported yet`)
+  if (exists(MONGODB_DUMP_PATH)) problems.push(`MongoDB dump ${MONGODB_DUMP_PATH} not imported yet`)
   if (problems.length === 0) return true
 
-  const hint = dump ? `請先執行 \`pnpm migrate --import-mongo\`，或將 ${MONGODB_DUMP_PATH} 移走` : MIGRATE_HINT
-  logger.error(`Data is not up to date (${problems.join('; ')}). ${hint}`)
+  logger.error(`Data is not up to date (${problems.join('; ')}). ${MIGRATE_HINT}`)
   return false
 }
 
