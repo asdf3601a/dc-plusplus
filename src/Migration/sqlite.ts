@@ -1,26 +1,26 @@
-// Direct SQLite access for `pnpm migrate` (node:sqlite), for what Prisma cannot do: copying a database
+// Direct SQLite access for `pnpm migrate` (better-sqlite3, the driver Prisma uses too), for what Prisma cannot do: copying a database
 // file, checking one, and finding out whether another connection holds it locked.
 import { copyFileSync as copyFile, existsSync as exists, mkdtempSync as mkdtemp, rmSync as rm } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as sleep } from 'node:timers/promises'
+import Database from 'better-sqlite3'
 
-const SQLITE_BUSY = 5
 // How long `pnpm migrate` waits for another connection to release the database: 5 tries, 2 s apart
 const LOCK_TRIES = 5
 const LOCK_RETRY_MS = 2000
 // Busy timeout for the backup copy, which only needs to read
 const READ_TIMEOUT_MS = 10_000
 
+// SQLITE_BUSY, or one of its extended codes (SQLITE_BUSY_RECOVERY, ...)
 function isBusy(error: unknown) {
-  const code = (error as { errcode?: unknown } | null)?.errcode
-  return typeof code === 'number' && (code & 0xff) === SQLITE_BUSY
+  if (!(error instanceof Database.SqliteError)) return false
+  return error.code === 'SQLITE_BUSY' || error.code.startsWith('SQLITE_BUSY_')
 }
 
 // A consistent copy of the database at path in dest, even while the bot is using it
 export function vacuumInto(path: string, dest: string) {
-  const db = new DatabaseSync(path, { readOnly: true, timeout: READ_TIMEOUT_MS })
+  const db = new Database(path, { readonly: true, timeout: READ_TIMEOUT_MS })
   try {
     db.prepare('VACUUM INTO ?').run(dest)
   } finally {
@@ -37,9 +37,9 @@ export function integrityProblems(path: string): string[] {
     const copy = join(tmp, 'check.db')
     copyFile(path, copy)
     if (exists(`${path}-wal`)) copyFile(`${path}-wal`, `${copy}-wal`)
-    let db: DatabaseSync | undefined
+    let db: Database.Database | undefined
     try {
-      db = new DatabaseSync(copy)
+      db = new Database(copy)
       const rows = db.prepare('SELECT integrity_check AS result FROM pragma_integrity_check').all() as { result: string }[]
       const problems = rows.map((row) => row.result)
       return problems.length === 1 && problems[0] === 'ok' ? [] : problems
@@ -57,7 +57,7 @@ export function integrityProblems(path: string): string[] {
 // connection holds the database at path locked, then returns undefined; still locked, returns what holds
 // it. Takes the lock only for a moment and changes nothing.
 export async function databaseLock(path: string, onRetry: (attempt: number, tries: number, waitMs: number) => void) {
-  const db = new DatabaseSync(path, { timeout: 0 })
+  const db = new Database(path, { timeout: 0 })
   try {
     for (let attempt = 1; ; attempt++) {
       try {
@@ -88,7 +88,7 @@ export async function databaseLock(path: string, onRetry: (attempt: number, trie
 // Empty when the database or the history table does not exist.
 export function failedMigrations(path: string): string[] {
   if (!exists(path)) return []
-  const db = new DatabaseSync(path, { readOnly: true, timeout: READ_TIMEOUT_MS })
+  const db = new Database(path, { readonly: true, timeout: READ_TIMEOUT_MS })
   try {
     const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_prisma_migrations'").all()
     if (table.length === 0) return []
