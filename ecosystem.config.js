@@ -18,10 +18,10 @@ module.exports = {
     deploy: {
         production: {
             user: 'node',
-            ref: 'origin/master',
+            ref: 'origin/main',
             repo: 'https://github.com/jimchen5209/Discord-Voice-log.git',
             path: '/var/www/production',
-            'post-deploy': 'pnpm install && pnpm build && pnpm migrate && pm2 reload ecosystem.config.js --env production'
+            'post-deploy': 'pnpm install && pnpm db:generate && pnpm build:prod && pnpm migrate && pm2 reload ecosystem.config.js --env production'
         }
     }
 };
