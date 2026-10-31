@@ -10,7 +10,7 @@ The upgrade steps are in the [README](../README.md#upgrading). This page explain
 
 The bot never migrates on its own. It exits with code 78 when it needs you before it can run:
 
-- The database has unapplied migrations, the data version is older than the code's, or a MongoDB dump (`./mongo_dump.json`, or `MONGODB_DUMP_PATH`) is waiting to be imported. It logs ``請先執行 `pnpm migrate` ``.
+- The database has unapplied migrations, the data version is older than the code's, or a MongoDB dump at `./mongo_dump.json` is waiting to be imported. It logs ``請先執行 `pnpm migrate` ``.
 - The data version record is malformed or newer than the code. It logs an error.
 - `prisma/migrations` is missing, for example because the bot was started from another directory. It logs the missing path.
 - `config.json` does not exist. The bot generates an empty one; fill it in and start the bot again.
@@ -23,7 +23,7 @@ pm2 does not restart the bot on code 78 (`stop_exit_codes` in `ecosystem.config.
 
 ## Backups
 
-`pnpm migrate` makes a backup only when there is something to migrate: unapplied database migrations, a data version record that is missing or older than the code's, or a MongoDB dump (`./mongo_dump.json`, or `MONGODB_DUMP_PATH`). When there is none of these, it changes nothing, makes no backup and exits with code 0; `--yolo` and `--backup-dir` then exit with code 1, since there is no backup to skip or place. A release that changes neither the database nor the data format therefore makes no backup; if you may want to go back to an older version of the bot, back up yourself first.
+`pnpm migrate` makes a backup only when there is something to migrate: unapplied database migrations, a data version record that is missing or older than the code's, or a MongoDB dump (`./mongo_dump.json`, or the path given with `--mongo-dump <path>`, which must exist: a missing one exits with code 1 and changes nothing). When there is none of these, it changes nothing, makes no backup and exits with code 0; `--yolo` and `--backup-dir` then exit with code 1, since there is no backup to skip or place. A release that changes neither the database nor the data format therefore makes no backup; if you may want to go back to an older version of the bot, back up yourself first.
 
 Before it changes anything, `pnpm migrate` backs up all the data to a new directory `backup/<YYYYMMDD-HHmmss-SSS>/` (with `-1`, `-2`, ... if that name is taken), whatever this run changes: the database (a consistent copy, even while the bot is running), every file in `assets/`, `data-version.json`, and the MongoDB dump if there is one (it is deleted after the import). `--backup-dir <path>` puts the backup in `<path>/<YYYYMMDD-HHmmss-SSS>/` instead; `<path>` must not be inside `assets/`, since that is backed up and restored whole.
 

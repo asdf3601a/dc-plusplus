@@ -70,10 +70,10 @@ If you have an existing MongoDB database and want to move the data to the new SQ
 
    If the dump is invalid or the import fails, `pnpm migrate` exits with an error, nothing is imported and the dump stays where it is; fix the problem and run it again. Documents are upserted by `serverID`, so running it again with the same dump is safe. If only deleting the dump fails, the data is already imported: move the dump away yourself. After a successful import the dump is gone, so the next `pnpm migrate` has nothing to import and makes no backup for it. The bot never imports the dump on its own: while the dump file is present, `pnpm start` logs an error asking you to run `pnpm migrate` and exits with code 78.
 
-   *Note: If your dump file has a different name or location, set `MONGODB_DUMP_PATH` for both `pnpm migrate` and `pnpm start`:*
+   *Note: If your dump file has a different name or location, pass it with `--mongo-dump`. If that file does not exist, `pnpm migrate` exits with code 1 before the backup, changing nothing (a missing `./mongo_dump.json` without the flag just means there is no dump). `pnpm start` only checks `./mongo_dump.json`.*
 
    ```bash
-   MONGODB_DUMP_PATH="./my_custom_dump.json" pnpm migrate
+   pnpm migrate --mongo-dump ./my_custom_dump.json
    ```
 
 6. **Verification**:

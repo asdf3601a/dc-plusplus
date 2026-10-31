@@ -4,9 +4,9 @@
 import { migrate, restoreBackup } from './Migration'
 import { instances } from './Utils/Instances'
 
-const OPTIONS = ['--preflight', '--skip-invalid', '--yolo', '--backup-dir <path>', '--restore <path>']
+const OPTIONS = ['--preflight', '--skip-invalid', '--yolo', '--backup-dir <path>', '--restore <path>', '--mongo-dump <path>']
 // Options that make no sense with --restore, which only puts a backup back
-const NOT_WITH_RESTORE = ['--preflight', '--skip-invalid', '--yolo']
+const NOT_WITH_RESTORE = ['--preflight', '--skip-invalid', '--yolo', '--mongo-dump']
 
 async function run() {
   // `pnpm migrate -- --skip-invalid` passes the "--" through
@@ -15,15 +15,17 @@ async function run() {
   const problems: string[] = []
   let backupDir: string | undefined
   let restoreDir: string | undefined
+  let mongoDump: string | undefined
   const value = (i: number) => (args[i + 1] !== undefined && !args[i + 1].startsWith('--') ? args[i + 1] : undefined)
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
-    if (arg === '--backup-dir' || arg === '--restore') {
+    if (arg === '--backup-dir' || arg === '--restore' || arg === '--mongo-dump') {
       const path = value(i)
       if (path === undefined) problems.push(`${arg} needs a path`)
       else i++
       if (arg === '--backup-dir') backupDir = path
-      else restoreDir = path
+      else if (arg === '--restore') restoreDir = path
+      else mongoDump = path
       flags.add(arg)
     } else if (arg === '--preflight' || arg === '--skip-invalid' || arg === '--yolo') {
       flags.add(arg)
@@ -41,7 +43,7 @@ async function run() {
     return false
   }
   if (restoreDir !== undefined) return restoreBackup({ dir: restoreDir, backupDir })
-  return migrate({ preflight: flags.has('--preflight'), skipInvalid: flags.has('--skip-invalid'), yolo: flags.has('--yolo'), backupDir })
+  return migrate({ preflight: flags.has('--preflight'), skipInvalid: flags.has('--skip-invalid'), yolo: flags.has('--yolo'), backupDir, mongoDump })
 }
 
 run()

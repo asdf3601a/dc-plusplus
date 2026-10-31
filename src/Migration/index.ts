@@ -15,9 +15,9 @@ import { databaseLock, failedMigrations } from './sqlite'
 // one step for the bump to ASSET_STEPS.
 export const DATA_VERSION = 2
 
-// MongoDB export that `pnpm migrate` imports into SQLite whenever it exists (set MONGODB_DUMP_PATH for
+// MongoDB export that `pnpm migrate` imports into SQLite whenever it exists (`--mongo-dump <path>` for
 // another path), deleting it afterwards; the bot refuses to start while it exists
-export const MONGODB_DUMP_PATH = process.env.MONGODB_DUMP_PATH ?? './mongo_dump.json'
+export const DEFAULT_MONGODB_DUMP = './mongo_dump.json'
 
 const MIGRATIONS_DIR = 'prisma/migrations'
 // Rewrites existing rows (ttsType -> ttsProvider); unmapped values are logged before it runs
@@ -33,20 +33,27 @@ type RunState = { yolo: boolean; backupDir?: string }
 // connection holds the database locked, and stops there, changing nothing and making no backup, when
 // there is nothing to migrate (see backupReasons). Otherwise backs up what it will change (unless yolo)
 // to a new directory in backupDir, applies the database migrations (`prisma migrate deploy`), imports the MongoDB dump at
-// MONGODB_DUMP_PATH if it exists, then upgrades the app-side data. With preflight it stops after the check, having only
+// mongoDump (or DEFAULT_MONGODB_DUMP if it exists when not given), then upgrades the app-side data. With preflight it stops after the check, having only
 // read. Returns false on failure, after saying what was changed and how to restore the backup.
 export async function migrate({
   preflight = false,
   skipInvalid = false,
   yolo = false,
-  backupDir
+  backupDir,
+  mongoDump
 }: {
   preflight?: boolean
   skipInvalid?: boolean
   yolo?: boolean
   backupDir?: string
+  mongoDump?: string
 }) {
-  const dumpPath = exists(MONGODB_DUMP_PATH) ? MONGODB_DUMP_PATH : undefined
+  // A path given with --mongo-dump must exist; the default one is imported only when it does
+  if (mongoDump !== undefined && !exists(mongoDump)) {
+    logger.error(`MongoDB dump ${mongoDump} (--mongo-dump) not found; nothing was changed`)
+    return false
+  }
+  const dumpPath = mongoDump ?? (exists(DEFAULT_MONGODB_DUMP) ? DEFAULT_MONGODB_DUMP : undefined)
   if (!preflightData({ skipInvalid })) return false
   if (dumpPath !== undefined && !preflightMongoDump(dumpPath)) return false
   if (preflight) return true
@@ -269,7 +276,7 @@ export async function checkData(): Promise<boolean> {
   if (pending.length > 0) problems.push(`unapplied database migrations: ${pending.join(', ')}`)
   if (record.kind === 'none') problems.push(`no data version recorded in ${path}`)
   else if (record.version < DATA_VERSION) problems.push(`data version ${record.version} is older than ${DATA_VERSION}`)
-  if (exists(MONGODB_DUMP_PATH)) problems.push(`MongoDB dump ${MONGODB_DUMP_PATH} not imported yet`)
+  if (exists(DEFAULT_MONGODB_DUMP)) problems.push(`MongoDB dump ${DEFAULT_MONGODB_DUMP} not imported yet`)
   if (problems.length === 0) return true
 
   logger.error(`Data is not up to date (${problems.join('; ')}). ${MIGRATE_HINT}`)
