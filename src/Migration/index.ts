@@ -22,6 +22,8 @@ export const MONGODB_DUMP_PATH = process.env.MONGODB_DUMP_PATH ?? './mongo_dump.
 
 const MIGRATIONS_DIR = 'prisma/migrations'
 const MIGRATE_HINT = '請先執行 `pnpm migrate`'
+const DEPLOY_FAILED_HINT =
+  'A failed database migration is rolled back and leaves the database as it was, but Prisma keeps it recorded as failed (P3018 on the failing run, P3009 on every later one). Fix the cause shown by the P3018 error, run `pnpm exec prisma migrate resolve --rolled-back <migration name>` with the name printed above, then run `pnpm migrate` again'
 
 const logger = instances.mainLogger.getSubLogger({ name: 'DataMigration' })
 
@@ -45,6 +47,8 @@ function deployDatabaseMigrations() {
   const result = spawnSync(process.execPath, [require.resolve('prisma/build/index.js'), 'migrate', 'deploy'], { stdio: 'inherit' })
   if (result.status === 0) return true
   instances.mainLogger.error(`prisma migrate deploy failed (${result.error ?? `exit ${result.status ?? result.signal}`}); the data was not upgraded`)
+  // Every migration runs in one transaction, so a failed one changed nothing but stays recorded as failed
+  if (!result.error) instances.mainLogger.error(DEPLOY_FAILED_HINT)
   return false
 }
 

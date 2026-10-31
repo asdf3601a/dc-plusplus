@@ -32,6 +32,15 @@
 
 The bot never migrates on its own: if the database has unapplied migrations, the data version is older than the code's, or a MongoDB dump is waiting to be imported, it logs ``請先執行 `pnpm migrate` `` (for the dump: run `pnpm migrate --import-mongo` or move the file away) and exits with code 78. It also exits with code 78, after logging an error, when the data version record is malformed or newer than the code. pm2 does not restart the bot on code 78 (`stop_exit_codes` in `ecosystem.config.js`). `pm2 deploy` runs `pnpm migrate` in its post-deploy step before reloading the bot.
 
+### A failed database migration
+
+Each database migration runs in one transaction, so when `prisma migrate deploy` fails (or is killed) the failed migration is rolled back and the database is left as it was. `pnpm migrate` then exits with code 1 before importing a dump or converting `assets/`, and the bot keeps refusing to start (code 78). Prisma still records the migration as failed: the failing run reports `P3018` with the database error and the migration name, and every later run reports `P3009` until it is resolved. Fix the cause shown by `P3018`, then mark the migration as rolled back and migrate again:
+
+```bash
+pnpm exec prisma migrate resolve --rolled-back <migration name, e.g. 20261030120000_tts_provider>
+pnpm migrate
+```
+
 ## Data version
 
 The database is versioned by Prisma's migration history (`prisma/migrations`). The app-side data, `assets/<User ID>.json`, has its own version, `DATA_VERSION` in `src/Migration/index.ts` (currently `2`), recorded in `data-version.json` next to the database file (by default `prisma/data-version.json`), e.g. `{ "version": 2 }`.
@@ -46,6 +55,7 @@ The database is versioned by Prisma's migration history (`prisma/migrations`). T
 Rules for contributors:
 - Bump `DATA_VERSION` only for a breaking change to the assets format, at most once per PR, with exactly one step for the bump in `ASSET_STEPS` (`src/Migration/assets/steps.ts`).
 - Database changes go into a new Prisma migration. Never edit a released migration; this release adds `prisma/migrations/20261030120000_tts_provider`.
+- Prisma does not wrap SQLite migrations in a transaction: a migration with more than one statement puts them between `BEGIN;` and `COMMIT;` (with `PRAGMA foreign_keys` outside, where SQLite honours it), so that a failure leaves nothing half done.
 
 ## Database Migration
 
