@@ -52,6 +52,12 @@ function backupTimestamp(date = new Date()) {
   return `${day}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}-${pad(date.getMilliseconds(), 3)}`
 }
 
+// Whether path is dir itself or somewhere under it
+function isInside(path: string, dir: string) {
+  const rel = relative(resolve(dir), resolve(path))
+  return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel))
+}
+
 // A new, empty <baseDir>/<timestamp>[-n]; never reuses an existing directory
 function createBackupDir(baseDir: string) {
   mkDir(baseDir, { recursive: true })
@@ -132,6 +138,8 @@ export async function backup({
   reason: Manifest['reason']
   dataVersion: number | null
 }) {
+  const holder = dirs.find((path) => isInside(baseDir, path))
+  if (holder !== undefined) throw new Error(`the backup directory ${baseDir} is inside ${holder}, which is backed up and restored whole; choose one outside it`)
   const dir = createBackupDir(baseDir)
   try {
     const entries: BackupEntry[] = []
@@ -237,6 +245,8 @@ export function readBackup(dir: string): { manifest?: Manifest; problems: string
 export async function restore(dir: string, { baseDir = BACKUP_DIR, dataVersion }: { baseDir?: string; dataVersion: number | null }) {
   const { manifest, problems } = readBackup(dir)
   if (!manifest || problems.length > 0) throw new RestoreError(`${dir} cannot be restored, nothing was changed: ${problems.join('; ')}`)
+  const holder = manifest.dirs.find((path) => isInside(dir, path))
+  if (holder !== undefined) throw new RestoreError(`${dir} is inside ${holder}, which the restore replaces; move the backup out of it first, nothing was changed`)
 
   const database = manifest.entries.find((entry) => entry.kind === 'database')?.original
   const sidecars = database === undefined ? [] : [`${database}-wal`, `${database}-shm`]
