@@ -26,11 +26,17 @@
 
 ## Upgrading
 
-1. Stop the bot and back up the database file (by default `prisma/voice-log.db`), `assets/` and, if you import one, the MongoDB dump. `pnpm migrate` makes **no** backups and deletes the dump after importing it.
-2. Run `pnpm migrate`. It first checks the data version record and the assets, and stops before touching the database if the record is malformed or newer than the code or an asset file is invalid (see below). It then applies pending database migrations (`prisma migrate deploy`), imports a MongoDB dump if you pass `--import-mongo` (see [Database Migration](#database-migration)), and upgrades `assets/<User ID>.json` to the current [data version](#data-version). Running it again changes nothing.
+1. Stop the bot.
+2. Run `pnpm migrate`. It first checks the data version record and the assets, and stops before touching the database if the record is malformed or newer than the code or an asset file is invalid (see below). It then [backs up](#backups) what it is about to change, applies pending database migrations (`prisma migrate deploy`), imports a MongoDB dump if you pass `--import-mongo` (see [Database Migration](#database-migration)), and upgrades `assets/<User ID>.json` to the current [data version](#data-version). Running it again changes nothing.
 3. Run `pnpm start`.
 
-The bot never migrates on its own: if the database has unapplied migrations, the data version is older than the code's, or a MongoDB dump is waiting to be imported, it logs ``請先執行 `pnpm migrate` `` (for the dump: run `pnpm migrate --import-mongo` or move the file away) and exits with code 78. It also exits with code 78, after logging an error, when the data version record is malformed or newer than the code. pm2 does not restart the bot on code 78 (`stop_exit_codes` in `ecosystem.config.js`). `pm2 deploy` runs `pnpm migrate` in its post-deploy step before reloading the bot.
+The bot never migrates on its own: if the database has unapplied migrations, the data version is older than the code's, or a MongoDB dump is waiting to be imported, it logs ``請先執行 `pnpm migrate` `` (for the dump: run `pnpm migrate --import-mongo` or move the file away) and exits with code 78. It also exits with code 78, after logging an error, when the data version record is malformed or newer than the code. pm2 does not restart the bot on code 78 (`stop_exit_codes` in `ecosystem.config.js`). `pm2 deploy` runs `pnpm migrate` in its post-deploy step before reloading the bot, so it backs up as well.
+
+### Backups
+
+Before it changes anything, `pnpm migrate` copies what this run will change to `backup/<YYYYMMDD-HHmmss>/`: the database file if it has pending migrations or a MongoDB dump is imported into it (a consistent copy, even while the bot is running), the `assets/*.json` files and `data-version.json` if the data version is older, and the MongoDB dump passed to `--import-mongo` (it is deleted after the import). When nothing needs changing, or with `--preflight`, no backup is made. An existing backup is never overwritten. If the backup fails, `pnpm migrate` exits with code 1 before changing anything; fix the problem (e.g. a file named `backup`, or a full disk) and run it again. `pnpm migrate --yolo` skips the backup (it only logs a warning); back up yourself first. Old backups are never deleted; remove them yourself.
+
+To restore a backup: stop the bot, copy the database file back to its path (by default `prisma/voice-log.db`, and delete any `voice-log.db-wal` / `voice-log.db-shm` next to it), `assets/` into `assets/`, and `data-version.json` next to the database (if the backup has `assets/` but no `data-version.json`, the install had no record: delete `data-version.json`). The dump is only needed to import it again. Then run the version of the bot that matches the restored data.
 
 ### A failed database migration
 
@@ -48,7 +54,7 @@ The database is versioned by Prisma's migration history (`prisma/migrations`). T
 `pnpm migrate` and the data version:
 - No record and no `assets/*.json`: a fresh install; the current version is recorded and nothing is converted.
 - No record but some `assets/*.json`: an install from before data versions (version 1).
-- Older version: the files are converted in place, one version at a time (not backed up; back up `assets/` first). The new version is recorded only after every file was converted; on a failure the old version stays and running `pnpm migrate` again finishes the job.
+- Older version: the files are [backed up](#backups) (unless `--yolo`), then converted in place, one version at a time. The new version is recorded only after every file was converted; on a failure the old version stays and running `pnpm migrate` again finishes the job.
 - An `assets/*.json` that is not a JSON object (invalid JSON, an array, ...) fails the run before the database is migrated or anything is converted, and the error lists every such file. Fix or remove them, or run `pnpm migrate --skip-invalid` (or `pnpm migrate -- --skip-invalid`; the option applies to every step) to leave them unconverted and record the new version anyway (the bot then skips those files with an error).
 - Newer version (a downgrade) or a malformed record: an error is logged, nothing is changed (the database is not migrated either), `pnpm migrate` exits with code 1 and `pnpm start` with code 78.
 
@@ -59,7 +65,7 @@ Rules for contributors:
 
 ## Database Migration
 
-If you are upgrading from an older version that used MongoDB, please refer to the [Migration Guide](docs/migration/MONGODB_TO_SQLITE_MIGRATION.md) to move your data to SQLite. In short: put the `mongoexport` dump at `./mongo_dump.json` (or set `MONGODB_DUMP_PATH`) and run `pnpm migrate --import-mongo` (or `pnpm migrate --import-mongo <path>`). It imports every document in one transaction, so an invalid dump imports nothing, then deletes the dump (back it up first). `pnpm migrate` without `--import-mongo` never imports. `pnpm start` refuses to start (exit code 78) while the dump file is present.
+If you are upgrading from an older version that used MongoDB, please refer to the [Migration Guide](docs/migration/MONGODB_TO_SQLITE_MIGRATION.md) to move your data to SQLite. In short: put the `mongoexport` dump at `./mongo_dump.json` (or set `MONGODB_DUMP_PATH`) and run `pnpm migrate --import-mongo` (or `pnpm migrate --import-mongo <path>`). It imports every document in one transaction, so an invalid dump imports nothing, then deletes the dump (after [backing it up](#backups) to `backup/<YYYYMMDD-HHmmss>/`, unless `--yolo`). `pnpm migrate` without `--import-mongo` never imports. `pnpm start` refuses to start (exit code 78) while the dump file is present.
 
 ## Voice Activity Sound
 

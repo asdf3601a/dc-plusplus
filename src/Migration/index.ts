@@ -3,6 +3,7 @@ import { existsSync as exists, readdirSync as readDir, readFileSync as readFile 
 import { instances } from '../Utils/Instances'
 import { writeAtomic } from '../Utils/WriteAtomic'
 import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles } from './assets/steps'
+import { backup } from './backup'
 import { importMongoDump, preflightMongoDump } from './import-mongo'
 import { databasePath, readRecord, recordFilePath, writeRecord } from './record'
 
@@ -27,19 +28,56 @@ const DEPLOY_FAILED_HINT =
 
 const logger = instances.mainLogger.getSubLogger({ name: 'DataMigration' })
 
-// `pnpm migrate`: checks the data version record and the assets (preflight), applies the database
-// migrations (`prisma migrate deploy`), imports the MongoDB dump at dumpPath if given, then upgrades the
-// app-side data. With preflight it stops after the check, having only read. Returns false on failure.
-export async function migrate({ preflight = false, skipInvalid = false, dumpPath }: { preflight?: boolean; skipInvalid?: boolean; dumpPath?: string }) {
+// `pnpm migrate`: checks the data version record and the assets (preflight), backs up what it will change
+// (unless yolo), applies the database migrations (`prisma migrate deploy`), imports the MongoDB dump at
+// dumpPath if given, then upgrades the app-side data. With preflight it stops after the check, having only
+// read. Returns false on failure.
+export async function migrate({
+  preflight = false,
+  skipInvalid = false,
+  yolo = false,
+  dumpPath
+}: {
+  preflight?: boolean
+  skipInvalid?: boolean
+  yolo?: boolean
+  dumpPath?: string
+}) {
   if (!preflightData({ skipInvalid })) return false
   if (dumpPath !== undefined && !preflightMongoDump(dumpPath)) return false
   if (dumpPath === undefined && exists(MONGODB_DUMP_PATH)) {
     instances.mainLogger.warn(`MongoDB dump ${MONGODB_DUMP_PATH} is not imported without --import-mongo; the bot refuses to start while it is there`)
   }
   if (preflight) return true
+  if (!(await backupData({ yolo, dumpPath }))) return false
   if (!deployDatabaseMigrations()) return false
   if (dumpPath !== undefined && !(await importMongoDump(dumpPath))) return false
   return migrateData({ skipInvalid })
+}
+
+// Run by `pnpm migrate` after the preflight, before anything is changed. Backs up only what this run
+// changes: the database if it has pending migrations or the dump is imported into it, assets/*.json and
+// the record if the data version is older, and the dump (deleted after the import). With yolo it only
+// warns. Returns false, having changed nothing, when the backup fails.
+async function backupData({ yolo, dumpPath }: { yolo: boolean; dumpPath?: string }) {
+  if (yolo) {
+    logger.warn('--yolo: no backup was made')
+    return true
+  }
+  const database = databasePath()
+  const changesDatabase = exists(database) && (dumpPath !== undefined || (await pendingMigrations()).length > 0)
+  // preflightData already rejected a malformed or newer record
+  const record = readRecord(recordFilePath())
+  const assets = record.kind === 'ok' && record.version === DATA_VERSION ? [] : assetConfigFiles()
+  const files = [...(assets.length > 0 && record.kind === 'ok' ? [recordFilePath()] : []), ...(dumpPath !== undefined ? [dumpPath] : [])]
+  if (!changesDatabase && assets.length === 0 && files.length === 0) return true
+  try {
+    logger.info(`Backed up to ${await backup({ database: changesDatabase ? database : undefined, assets, files })}`)
+    return true
+  } catch (error) {
+    logger.error('Backup failed; nothing was changed. Fix the problem and run `pnpm migrate` again, or run `pnpm migrate --yolo` to migrate without a backup:', error)
+    return false
+  }
 }
 
 // The Prisma CLI of this install, run with this node so it needs no shell or PATH entry

@@ -4,7 +4,7 @@
 import { MONGODB_DUMP_PATH, migrate } from './Migration'
 import { instances } from './Utils/Instances'
 
-const OPTIONS = ['--preflight', '--skip-invalid', '--import-mongo [path]']
+const OPTIONS = ['--preflight', '--skip-invalid', '--yolo', '--import-mongo [path]']
 
 async function run() {
   // `pnpm migrate -- --skip-invalid` passes the "--" through
@@ -16,7 +16,7 @@ async function run() {
     const arg = args[i]
     if (arg === '--import-mongo') {
       dumpPath = args[i + 1] !== undefined && !args[i + 1].startsWith('--') ? args[++i] : MONGODB_DUMP_PATH
-    } else if (arg === '--preflight' || arg === '--skip-invalid') {
+    } else if (arg === '--preflight' || arg === '--skip-invalid' || arg === '--yolo') {
       flags.add(arg)
     } else {
       unknown.push(arg)
@@ -26,7 +26,7 @@ async function run() {
     instances.mainLogger.error(`Unknown option ${unknown.join(', ')} (available: ${OPTIONS.join(', ')})`)
     return false
   }
-  return migrate({ preflight: flags.has('--preflight'), skipInvalid: flags.has('--skip-invalid'), dumpPath })
+  return migrate({ preflight: flags.has('--preflight'), skipInvalid: flags.has('--skip-invalid'), yolo: flags.has('--yolo'), dumpPath })
 }
 
 run()

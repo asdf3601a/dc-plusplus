@@ -139,3 +139,6 @@ config*.json
 vlogdata.json
 vlogdata.json.bak
 mongo*.json
+
+# database and assets backups made by pnpm migrate
+backup/
