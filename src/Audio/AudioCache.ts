@@ -48,7 +48,8 @@ export class AudioCache {
   }
 
   private pathFor(provider: TTSProvider, text: string, lang: string, voice = ''): string {
-    return `${this.dir}/${createHash('md5').update(`${provider.id}:${text}-${lang}-${voice}`).digest('hex')}.${EXTENSIONS[provider.format]}`
+    const key = provider.cacheKey?.(text, lang, voice) ?? `${text}-${lang}-${voice}`
+    return `${this.dir}/${createHash('md5').update(`${provider.id}:${key}`).digest('hex')}.${EXTENSIONS[provider.format]}`
   }
 
   // Resolves to the cached file path, synthesizing it on a miss; null when synthesis failed.

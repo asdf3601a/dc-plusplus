@@ -23,9 +23,21 @@ export class XaiTTS implements TTSProvider {
     return this.config().apiKey ? undefined : 'xaiTTS.apiKey is not set in config.json'
   }
 
-  public async synthesize(text: string, lang: string, voice = ''): Promise<Uint8Array | null> {
-    const { apiKey, voice: defaultVoice, language } = this.config()
+  public cacheKey(text: string, lang: string, voice: string) {
+    return `${text}-${this.language(lang)}-${this.voice(voice)}-pcm48000`
+  }
+
+  private language(lang: string) {
     const primary = lang.split(/[-_]/)[0].toLowerCase()
+    return this.config().language || (LANGUAGES.has(primary) ? primary : 'auto')
+  }
+
+  private voice(voice: string) {
+    return voice || this.config().voice || 'eve'
+  }
+
+  public async synthesize(text: string, lang: string, voice = ''): Promise<Uint8Array | null> {
+    const { apiKey } = this.config()
     try {
       const res = await fetch('https://api.x.ai/v1/tts', {
         method: 'POST',
@@ -34,8 +46,8 @@ export class XaiTTS implements TTSProvider {
         body: JSON.stringify({
           text,
           // biome-ignore lint/style/useNamingConvention: xAI API field
-          voice_id: voice || defaultVoice || 'eve',
-          language: language || (LANGUAGES.has(primary) ? primary : 'auto'),
+          voice_id: this.voice(voice),
+          language: this.language(lang),
           // biome-ignore lint/style/useNamingConvention: xAI API field
           output_format: { codec: 'pcm', sample_rate: 48000 }
         })

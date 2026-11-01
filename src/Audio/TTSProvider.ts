@@ -10,5 +10,7 @@ export interface TTSProvider {
   readonly usesVoice: boolean
   // Why the provider cannot be used right now (e.g. missing API key), or undefined when it can
   unavailableReason(): string | undefined
+  // Cache key after the id, when it is not text-lang-voice as given (e.g. the voice and language actually sent)
+  cacheKey?(text: string, lang: string, voice: string): string
   synthesize(text: string, lang: string, voice?: string): Promise<Uint8Array | null>
 }
