@@ -27,17 +27,14 @@ interface DumpRow {
 // Throws, naming the first bad document, unless the whole dump parses and every field has the right type
 function readMongoDump(dumpPath: string): DumpRow[] {
   const rawData = readFile(dumpPath, { encoding: 'utf-8' }).trim()
-  let documents: unknown
-  if (rawData.startsWith('[')) {
-    documents = JSON.parse(rawData)
-  } else if (rawData.includes('\n')) {
-    documents = rawData
-      .split('\n')
-      .filter((line) => line.trim())
-      .map((line) => JSON.parse(line))
-  } else {
-    documents = JSON.parse(rawData)
-  }
+  // One document per line (mongoexport's default), else a JSON array or a single document
+  const documents: unknown =
+    !rawData.startsWith('[') && rawData.includes('\n')
+      ? rawData
+          .split('\n')
+          .filter((line) => line.trim())
+          .map((line) => JSON.parse(line))
+      : JSON.parse(rawData)
 
   // Handle both array of docs or mongoexport object format
   const dataArray: unknown[] = Array.isArray(documents) ? documents : [documents]
