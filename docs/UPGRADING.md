@@ -6,6 +6,20 @@ The upgrade steps are in the [README](../README.md#upgrading). This page explain
 
 `pnpm migrate` first checks the data version record and the assets, and stops before touching the database if the record is malformed or newer than the code or an asset file is invalid (see [Data version](#data-version)). It then waits up to about 10 seconds if another connection holds the database locked, stops there if there is nothing to migrate, [backs up](#backups) the data, applies pending database migrations (`prisma migrate deploy`), imports the MongoDB dump if there is one (see the [MongoDB to SQLite migration guide](migration/MONGODB_TO_SQLITE_MIGRATION.md)), and upgrades `assets/<User ID>.json` to the current [data version](#data-version). Running it again changes nothing and makes no backup.
 
+## Options
+
+`pnpm migrate --help` prints these options (they are defined in `src/migrate.ts`):
+
+- `-h, --help`: Print this help and exit, changing nothing; wins over every other option
+- `--preflight`: Only check the data version record, the assets and the MongoDB dump, then stop; changes nothing and makes no backup
+- `--skip-invalid`: Leave asset files that are not a JSON object unconverted instead of failing the run
+- `--yolo`: Migrate without making a backup first; back up yourself
+- `--backup-dir <path>`: Make the backup in <path>/<YYYYMMDD-HHmmss-SSS>/ instead of backup/
+- `--restore <path>`: Put the backup in <path> back, after backing up the current data; does not migrate
+- `--mongo-dump <path>`: Import the MongoDB dump at <path> instead of ./mongo_dump.json; the path must exist
+
+Refused combinations (exit code 1, nothing is changed): `--restore` with `--preflight`, `--skip-invalid`, `--yolo` or `--mongo-dump`, and `--yolo` with `--backup-dir`. An unknown option or a missing `<path>` is refused the same way.
+
 ## Exit code 78
 
 The bot never migrates on its own. It exits with code 78 when it needs you before it can run:
@@ -39,7 +53,7 @@ Stop the bot first. `pnpm migrate --restore` waits while another connection is i
 
 Then run `pnpm migrate --restore <path to the backup directory>`. It first checks the whole backup (the manifest, every sha256, and the database's integrity) and exits with code 1, changing nothing, if anything is off. It then backs up the current data (the database file as it is, `assets/` and the other files in the manifest) to a new directory in `backup/` (or `--backup-dir`) and logs its path, so `pnpm migrate --restore <that path>` undoes the restore. Then it puts the database, `assets/`, `data-version.json` and the dump back as they were: the database's `-wal` / `-shm` files are deleted, as are files the backup recorded as not existing and files in `assets/` that the backup does not have (they are in the backup of the current data).
 
-It does not migrate: `pnpm start` exits with code 78 until you run `pnpm migrate` again, unless you run the version of the bot that matches the restored data. `--restore` cannot be combined with `--yolo`, `--preflight` or `--skip-invalid`, and refuses a backup directory inside `assets/` for the same reason as `--backup-dir`.
+It does not migrate: `pnpm start` exits with code 78 until you run `pnpm migrate` again, unless you run the version of the bot that matches the restored data. `--restore` cannot be combined with `--yolo`, `--preflight`, `--skip-invalid` or `--mongo-dump`, and refuses a backup directory inside `assets/` for the same reason as `--backup-dir`.
 
 ## A failed migration
 
