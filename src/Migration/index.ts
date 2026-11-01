@@ -34,7 +34,7 @@ type RunState = { yolo: boolean; backupDir?: string }
 
 // `pnpm migrate`: checks the data version record and the assets (preflight), waits until no other
 // connection holds the database locked, and stops there, changing nothing and making no backup, when
-// there is nothing to migrate (see backupReasons). Otherwise backs up what it will change (unless yolo)
+// there is nothing to migrate (see outdatedReasons). Otherwise backs up what it will change (unless yolo)
 // to a new directory in backupDir, applies the database migrations (`prisma migrate deploy`), imports the MongoDB dump at
 // mongoDump (or DEFAULT_MONGODB_DUMP if it exists when not given), then upgrades the app-side data. With preflight it stops after the check, having only
 // read. Returns false on failure, after saying what was changed and how to restore the backup.
@@ -57,11 +57,13 @@ export async function migrate({
     return false
   }
   const dumpPath = mongoDump ?? (exists(DEFAULT_MONGODB_DUMP) ? DEFAULT_MONGODB_DUMP : undefined)
-  if (!preflightData({ skipInvalid })) return false
+  const record = readUsableRecord(recordFilePath(), 'nothing was changed')
+  if (!record || !preflightData(record, { skipInvalid })) return false
   if (dumpPath !== undefined && !preflightMongoDump(dumpPath)) return false
   if (preflight) return true
   if (!(await databaseUnlocked('nothing was changed'))) return false
-  const reasons = await backupReasons(dumpPath)
+  const pending = await pendingMigrations()
+  const reasons = outdatedReasons(pending, record, 'no data version recorded', dumpPath === undefined ? undefined : `MongoDB dump ${dumpPath}`)
   if (reasons.length === 0) {
     const unused = [...(yolo ? ['--yolo'] : []), ...(backupDir !== undefined ? ['--backup-dir'] : [])]
     if (unused.length > 0) {
@@ -73,14 +75,15 @@ export async function migrate({
   }
   logger.info(`To migrate: ${reasons.join('; ')}`)
   const run: RunState = { yolo }
-  if (!(await backupData({ yolo, dumpPath, backupDir: backupDir ?? BACKUP_DIR, run }))) return false
-  await logUnmappedTTSTypes()
+  const dataVersion = record.kind === 'ok' ? record.version : null
+  if (!(await backupData({ yolo, dumpPath, backupDir: backupDir ?? BACKUP_DIR, dataVersion, run }))) return false
+  if (pending.includes(TTS_PROVIDER_MIGRATION)) logUnmappedTTSTypes()
   if (!deployDatabaseMigrations()) return failed(run)
   if (dumpPath !== undefined && !(await importMongoDump(dumpPath))) {
     logger.error('The database migrations of this run were applied; assets/*.json and data-version.json were not changed')
     return failed(run)
   }
-  return (await migrateData({ skipInvalid })) || failed(run)
+  return (await migrateData(record, { skipInvalid })) || failed(run)
 }
 
 // MONGODB_DUMP_PATH was replaced by --mongo-dump; only warn, so a leftover setting does not stop an upgrade
@@ -134,20 +137,11 @@ async function databaseUnlocked(outcome: string) {
   return false
 }
 
-// What this `pnpm migrate` run has to migrate, from the three things that decide it: unapplied Prisma
-// migrations, a data version record that is missing or older than DATA_VERSION, and a MongoDB dump at
-// dumpPath to import. Empty when there is nothing to migrate, the only case in which `pnpm migrate` makes
-// no backup.
-async function backupReasons(dumpPath?: string) {
-  // preflightData already rejected a malformed or newer record
-  return outdatedReasons(readRecord(recordFilePath()), 'no data version recorded', dumpPath === undefined ? undefined : `MongoDB dump ${dumpPath}`)
-}
-
-// Why the data is not up to date: unapplied Prisma migrations, a data version record that is missing
-// (noRecord) or older than DATA_VERSION, and dump, a MongoDB dump still to import. Empty when it is.
-async function outdatedReasons(record: VersionRecord, noRecord: string, dump: string | undefined) {
+// Why the data is not up to date: pending, the unapplied Prisma migrations, a data version record that
+// is missing (noRecord) or older than DATA_VERSION, and dump, a MongoDB dump still to import. Empty when
+// it is, the only case in which `pnpm migrate` makes no backup.
+function outdatedReasons(pending: string[], record: UsableRecord, noRecord: string, dump: string | undefined) {
   const reasons: string[] = []
-  const pending = await pendingMigrations()
   if (pending.length > 0) reasons.push(`unapplied database migrations: ${pending.join(', ')}`)
   if (record.kind !== 'ok') reasons.push(noRecord)
   else if (record.version < DATA_VERSION) reasons.push(`data version ${record.version} is older than ${DATA_VERSION}`)
@@ -160,7 +154,7 @@ async function outdatedReasons(record: VersionRecord, noRecord: string, dump: st
 // backs up all the data: the database, every file in assets/, the record and the MongoDB dump at dumpPath
 // (deleted after the import), whatever this run changes. Makes no backup when none of
 // them exists yet (a fresh install). Returns false, having changed nothing, when the backup fails.
-async function backupData({ yolo, dumpPath, backupDir, run }: { yolo: boolean; dumpPath?: string; backupDir: string; run: RunState }) {
+async function backupData({ yolo, dumpPath, backupDir, dataVersion, run }: { yolo: boolean; dumpPath?: string; backupDir: string; dataVersion: number | null; run: RunState }) {
   if (yolo) {
     logger.warn('--yolo: no backup was made')
     return true
@@ -168,12 +162,10 @@ async function backupData({ yolo, dumpPath, backupDir, run }: { yolo: boolean; d
   const database = databasePath()
   const files = [recordFilePath(), ...(dumpPath !== undefined ? [dumpPath] : [])]
   if (!exists(database) && !exists(ASSETS_DIR) && !files.some((file) => exists(file))) return true
-  // preflightData already rejected a malformed or newer record
-  const record = readRecord(recordFilePath())
   try {
     // A path that does not exist (no database or record yet) is recorded as absent, so restoring
     // deletes the one this run creates
-    run.backupDir = await backup({ database, dirs: [ASSETS_DIR], files, baseDir: backupDir, reason: 'migrate', dataVersion: record.kind === 'ok' ? record.version : null })
+    run.backupDir = await backup({ database, dirs: [ASSETS_DIR], files, baseDir: backupDir, reason: 'migrate', dataVersion })
     logger.info(`Backed up to ${resolve(run.backupDir)}; to undo this run, stop the bot and run \`pnpm migrate --restore ${run.backupDir}\``)
     return true
   } catch (error) {
@@ -184,8 +176,7 @@ async function backupData({ yolo, dumpPath, backupDir, run }: { yolo: boolean; d
 
 // Before the tts_provider migration converts existing rows, logs every guild whose ttsType it maps to
 // the default provider because it is neither WaveNet nor Legacy
-async function logUnmappedTTSTypes() {
-  if (!exists(databasePath()) || !(await pendingMigrations()).includes(TTS_PROVIDER_MIGRATION)) return
+function logUnmappedTTSTypes() {
   // better-sqlite3 (see sqlite.ts): the generated client follows the new schema and has no ttsType
   for (const row of unmappedTTSTypes(databasePath(), MAPPED_TTS_TYPES)) {
     logger.warn(`Guild ${row.serverID} has unknown TTS type "${row.ttsType}"; migrating to the default provider ${UNMAPPED_TTS_PROVIDER}`)
@@ -229,10 +220,8 @@ function databaseStateAfterFailure() {
 // records the version only when every file was converted; otherwise the record is left as it was, so
 // running it again finishes the job. An asset file that is not a JSON object fails the run before
 // anything is converted, unless skipInvalid leaves such files as they are. Returns false on failure.
-async function migrateData({ skipInvalid = false } = {}): Promise<boolean> {
+async function migrateData(record: UsableRecord, { skipInvalid = false } = {}): Promise<boolean> {
   const path = recordFilePath()
-  const record = readUsableRecord(path, 'nothing was converted')
-  if (!record) return false
   if (record.kind === 'ok' && record.version === DATA_VERSION) {
     logger.info(`Data is already at version ${DATA_VERSION}`)
     return true
@@ -283,19 +272,17 @@ export async function checkData(): Promise<boolean> {
   if (!record) return false
 
   const dump = exists(DEFAULT_MONGODB_DUMP) ? `MongoDB dump ${DEFAULT_MONGODB_DUMP} not imported yet` : undefined
-  const problems = await outdatedReasons(record, `no data version recorded in ${path}`, dump)
+  const problems = outdatedReasons(await pendingMigrations(), record, `no data version recorded in ${path}`, dump)
   if (problems.length === 0) return true
 
   logger.error(`Data is not up to date (${problems.join('; ')}). ${MIGRATE_HINT}`)
   return false
 }
 
-// Run by `pnpm migrate` before `prisma migrate deploy`, so a malformed record, one newer than
-// DATA_VERSION, or (unless skipInvalid) an invalid asset file that migrateData would reject stops it
-// before the database is touched. Only reads.
-function preflightData({ skipInvalid = false } = {}): boolean {
-  const record = readUsableRecord(recordFilePath(), 'nothing was changed')
-  if (!record) return false
+// Run by `pnpm migrate` before `prisma migrate deploy` (after readUsableRecord rejected a malformed
+// record or one newer than DATA_VERSION), so (unless skipInvalid) an invalid asset file that migrateData
+// would reject stops it before the database is touched. Only reads.
+function preflightData(record: UsableRecord, { skipInvalid = false } = {}): boolean {
   if (skipInvalid || (record.kind === 'ok' && record.version === DATA_VERSION)) return true
   const { invalid } = planAssets(assetConfigFiles(), record.kind === 'ok' ? record.version : 1, false)
   if (invalid.length === 0) return true
@@ -309,9 +296,12 @@ function logInvalidAssets(invalid: string[], outcome: string) {
   )
 }
 
+// A data version record that is missing or at most DATA_VERSION
+type UsableRecord = Exclude<VersionRecord, { kind: 'invalid' }>
+
 // The record, or undefined (after logging an error ending in `outcome`) when it is malformed or newer
 // than DATA_VERSION, which nothing in this build may act on
-function readUsableRecord(path: string, outcome: string) {
+function readUsableRecord(path: string, outcome: string): UsableRecord | undefined {
   const record = readRecord(path)
   if (record.kind === 'invalid') {
     logger.error(`${record.reason}; ${outcome}`)
