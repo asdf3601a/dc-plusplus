@@ -1,7 +1,6 @@
 import { readFileSync as readFile } from 'node:fs'
-import { open, rm, stat } from 'node:fs/promises'
+import { open, rename, rm, stat } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { writeAtomic } from './WriteAtomic'
 
 // The Grok CLI's public OAuth client; the device code flow needs no client secret
 export const XAI_CLIENT_ID = 'b1a00492-073a-47ea-816f-4c329264a828'
@@ -27,14 +26,17 @@ export async function xaiEndpoints(): Promise<{ deviceEndpoint: string; tokenEnd
 }
 
 // A refresh response without a refresh_token keeps the previous one
-export async function saveXaiTokens(data: Record<string, unknown>, refreshToken?: string) {
+function tokensFrom(data: Record<string, unknown>, refreshToken?: string): XaiTokens {
   const lifetime = Number(data.expires_in) * 1000
   const tokens = { accessToken: data.access_token, refreshToken: data.refresh_token ?? refreshToken, expiresAt: Date.now() + lifetime, lifetime }
   if (!validTokens(tokens)) {
     throw new Error('xAI token response is missing access_token, refresh_token or expires_in')
   }
-  await writeAtomic(XAI_TOKEN_FILE, JSON.stringify(tokens), 0o600)
   return tokens
+}
+
+export function saveXaiTokens(data: Record<string, unknown>) {
+  return withTokenLock(async () => tokensFrom(data))
 }
 
 // Empty tokens are rejected too: XaiTTS redacts the access token with replaceAll, which an empty string breaks
@@ -67,15 +69,35 @@ function expiring({ expiresAt, lifetime }: XaiTokens) {
 export async function xaiAccessToken(): Promise<string> {
   const tokens = readTokens()
   if (!expiring(tokens)) return tokens.accessToken
-  return refresh()
+  return withTokenLock(async () => {
+    // Another process may have refreshed while this one waited
+    const current = readTokens()
+    if (!expiring(current)) return current.accessToken
+    const { tokenEndpoint } = await xaiEndpoints()
+    const res = await fetch(tokenEndpoint, {
+      method: 'POST',
+      // biome-ignore lint/style/useNamingConvention: OAuth parameters
+      body: new URLSearchParams({ grant_type: 'refresh_token', client_id: XAI_CLIENT_ID, refresh_token: current.refreshToken }),
+      signal: AbortSignal.timeout(20_000)
+    })
+    const data = await res.json().catch(() => undefined)
+    if (!res.ok) {
+      throw new Error(`xAI token refresh responded ${res.status}: ${data?.error_description ?? data?.error ?? 'no error details'}; run \`pnpm xai:login\` again`)
+    }
+    return tokensFrom(data, current.refreshToken)
+  })
 }
 
-async function refresh() {
+// Like git's index.lock, xai-oauth.json is only written through xai-oauth.json.lock: the tokens go into the held
+// lock, which is synced and renamed over xai-oauth.json, so the rename installs the file and releases the lock at
+// once. A crash mid-write leaves a partial lock for the stale rule to clear, never a partial xai-oauth.json.
+// update runs while the lock is held and returns the tokens to save, or an access token to leave the file as it is.
+async function withTokenLock(update: () => Promise<XaiTokens | string>): Promise<string> {
   const lock = `${XAI_TOKEN_FILE}.lock`
   let handle: Awaited<ReturnType<typeof open>> | undefined
   while (!handle) {
     try {
-      handle = await open(lock, 'wx')
+      handle = await open(lock, 'wx', 0o600)
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
       // A lock left by a process that died mid-refresh; a live refresh holds it at most 40 s (two 20 s requests)
@@ -84,24 +106,24 @@ async function refresh() {
       else await sleep(100)
     }
   }
+  // Held past the stale limit, the lock may have been removed and taken by another process
+  const { ino } = await handle.stat()
+  const owned = async () => (await stat(lock).catch(() => undefined))?.ino === ino
+  let renamed = false
   try {
-    // Another process may have refreshed while this one waited
-    const tokens = readTokens()
-    if (!expiring(tokens)) return tokens.accessToken
-    const { tokenEndpoint } = await xaiEndpoints()
-    const res = await fetch(tokenEndpoint, {
-      method: 'POST',
-      // biome-ignore lint/style/useNamingConvention: OAuth parameters
-      body: new URLSearchParams({ grant_type: 'refresh_token', client_id: XAI_CLIENT_ID, refresh_token: tokens.refreshToken }),
-      signal: AbortSignal.timeout(20_000)
-    })
-    const data = await res.json().catch(() => undefined)
-    if (!res.ok) {
-      throw new Error(`xAI token refresh responded ${res.status}: ${data?.error_description ?? data?.error ?? 'no error details'}; run \`pnpm xai:login\` again`)
-    }
-    return (await saveXaiTokens(data, tokens.refreshToken)).accessToken
-  } finally {
+    const result = await update()
+    if (typeof result === 'string') return result
+    await handle.writeFile(JSON.stringify(result))
+    await handle.sync()
+    if (!(await owned())) throw new Error(`${lock} was taken over by another process; ${XAI_TOKEN_FILE} was not updated`)
     await handle.close()
-    await rm(lock, { force: true })
+    await rename(lock, XAI_TOKEN_FILE)
+    renamed = true
+    return result.accessToken
+  } finally {
+    // Checked while the handle is open, so the inode number cannot have been reused by a newer lock
+    const ours = !renamed && (await owned())
+    await handle.close()
+    if (ours) await rm(lock, { force: true })
   }
 }
