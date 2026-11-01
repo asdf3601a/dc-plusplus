@@ -1,7 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync as exists, readdirSync as readDir, readFileSync as readFile } from 'node:fs'
 import { resolve } from 'node:path'
-import { Prisma } from '@prisma/client'
 import { EXIT_NO_RESTART } from '../Utils/ExitCode'
 import { instances } from '../Utils/Instances'
 import { writeAtomic } from '../Utils/WriteAtomic'
@@ -9,7 +8,7 @@ import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles } from './assets/steps'
 import { BACKUP_DIR, backup, RestoreError, restore } from './backup'
 import { importMongoDump, preflightMongoDump } from './import-mongo'
 import { databasePath, readRecord, recordFilePath, writeRecord } from './record'
-import { databaseLock, failedMigrations } from './sqlite'
+import { appliedMigrations, databaseLock, failedMigrations, unmappedTTSTypes } from './sqlite'
 
 // Version of the app-side data format (assets/<id>.json). The database is versioned by Prisma's
 // migration history instead. Bump it only for a breaking change, at most once per PR, and add exactly
@@ -23,6 +22,9 @@ export const DEFAULT_MONGODB_DUMP = './mongo_dump.json'
 const MIGRATIONS_DIR = 'prisma/migrations'
 // Rewrites existing rows (ttsType -> ttsProvider); unmapped values are logged before it runs
 const TTS_PROVIDER_MIGRATION = '20261030120000_tts_provider'
+// The ttsType values it maps, and the provider it writes for any other value (its CASE ... ELSE)
+const MAPPED_TTS_TYPES = ['WaveNet', 'Legacy']
+const UNMAPPED_TTS_PROVIDER = 'google-cloud'
 const MIGRATE_HINT = 'Run `pnpm migrate` first'
 
 const logger = instances.mainLogger.getSubLogger({ name: 'DataMigration' })
@@ -179,16 +181,9 @@ async function backupData({ yolo, dumpPath, backupDir, run }: { yolo: boolean; d
 // the default provider because it is neither WaveNet nor Legacy
 async function logUnmappedTTSTypes() {
   if (!exists(databasePath()) || !(await pendingMigrations()).includes(TTS_PROVIDER_MIGRATION)) return
-  const { prisma } = await import('../Core/SQLite/Client')
-  // Raw SQL: this runs before tts_provider, while serverConfig still has the old ttsType column, but the
-  // generated client follows the new schema; sqlite_master is not a Prisma model
-  const table = await prisma.$queryRaw<unknown[]>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'serverConfig'`
-  if (table.length === 0) return
-  const { DEFAULT_TTS_PROVIDER } = await import('../Core/SQLite/db/ServerConfig')
-  const mapped = Prisma.join(['WaveNet', 'Legacy'])
-  const rows = await prisma.$queryRaw<{ serverID: string; ttsType: string }[]>`SELECT serverID, ttsType FROM serverConfig WHERE ttsType NOT IN (${mapped})`
-  for (const row of rows) {
-    logger.warn(`Guild ${row.serverID} has unknown TTS type "${row.ttsType}"; migrating to the default provider ${DEFAULT_TTS_PROVIDER}`)
+  // better-sqlite3 (see sqlite.ts): the generated client follows the new schema and has no ttsType
+  for (const row of unmappedTTSTypes(databasePath(), MAPPED_TTS_TYPES)) {
+    logger.warn(`Guild ${row.serverID} has unknown TTS type "${row.ttsType}"; migrating to the default provider ${UNMAPPED_TTS_PROVIDER}`)
   }
 }
 
@@ -378,12 +373,8 @@ async function pendingMigrations() {
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name)
   if (!exists(databasePath())) return all
-  // Loaded here: importing the client creates the database directory, which --preflight must not do
-  const { prisma } = await import('../Core/SQLite/Client')
-  // Raw SQL: sqlite_master and _prisma_migrations are not Prisma models
-  const history = await prisma.$queryRaw<unknown[]>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_prisma_migrations'`
-  if (history.length === 0) return all
-  const applied = await prisma.$queryRaw<{ name: string }[]>`SELECT migration_name AS name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`
-  const appliedNames = new Set(applied.map((row) => row.name))
+  // better-sqlite3 (see sqlite.ts): _prisma_migrations is not a Prisma model, and the Prisma client
+  // creates the database directory, which --preflight must not do
+  const appliedNames = new Set(appliedMigrations(databasePath()))
   return all.filter((name) => !appliedNames.has(name))
 }

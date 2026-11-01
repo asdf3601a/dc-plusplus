@@ -1,5 +1,7 @@
 // Direct SQLite access for `pnpm migrate` (better-sqlite3, the driver Prisma uses too), for what Prisma cannot do: copying a database
-// file, checking one, and finding out whether another connection holds it locked.
+// file, checking one, finding out whether another connection holds it locked, and reading what the
+// generated client cannot see: SQLite's and Prisma's own tables (sqlite_master, _prisma_migrations) and
+// columns that only exist before a migration (the old serverConfig.ttsType; the client follows the new schema).
 import { copyFileSync as copyFile, existsSync as exists, mkdtempSync as mkdtemp, rmSync as rm } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -97,4 +99,35 @@ export function failedMigrations(path: string): string[] {
   } finally {
     db.close()
   }
+}
+
+// Names of the Prisma migrations the database has finished applying (not marked rolled back). Empty when
+// the database or the history table does not exist.
+export function appliedMigrations(path: string): string[] {
+  if (!exists(path)) return []
+  const db = new Database(path, { readonly: true, timeout: READ_TIMEOUT_MS })
+  try {
+    if (!hasTable(db, '_prisma_migrations')) return []
+    const rows = db.prepare('SELECT migration_name AS name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL').all() as { name: string }[]
+    return rows.map((row) => row.name)
+  } finally {
+    db.close()
+  }
+}
+
+// serverConfig rows whose ttsType is not one of mapped. Empty when the database or the table does not exist.
+export function unmappedTTSTypes(path: string, mapped: readonly string[]): { serverID: string; ttsType: string }[] {
+  if (!exists(path)) return []
+  const db = new Database(path, { readonly: true, timeout: READ_TIMEOUT_MS })
+  try {
+    if (!hasTable(db, 'serverConfig')) return []
+    const placeholders = mapped.map(() => '?').join(', ')
+    return db.prepare(`SELECT serverID, ttsType FROM serverConfig WHERE ttsType NOT IN (${placeholders})`).all(...mapped) as { serverID: string; ttsType: string }[]
+  } finally {
+    db.close()
+  }
+}
+
+function hasTable(db: Database.Database, name: string) {
+  return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined
 }
