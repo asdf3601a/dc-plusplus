@@ -3,7 +3,7 @@ import { unlink } from 'node:fs/promises'
 import { instances } from '../Utils/Instances'
 
 // MongoDB dumps store the TTS engine name, SQLite stores the provider id
-const MONGO_TTS_PROVIDERS = new Map([
+export const MONGO_TTS_PROVIDERS = new Map([
   ['WaveNet', 'google-cloud'],
   ['Legacy', 'google-translate']
 ])
@@ -105,16 +105,9 @@ export async function importMongoDump(dumpPath: string): Promise<boolean> {
 
   logger.info(`Found ${rows.length} documents in ${dumpPath}. Migrating to SQLite...`)
   const upserts = rows.map(({ serverID, ttsType, ...fields }) => {
-    let ttsProvider = DEFAULT_TTS_PROVIDER
-    if (ttsType !== undefined) {
-      const mapped = MONGO_TTS_PROVIDERS.get(ttsType)
-      if (mapped) {
-        ttsProvider = mapped
-      } else {
-        logger.warn(`Guild ${serverID} has unknown TTS type "${ttsType}"; migrating to the default provider ${DEFAULT_TTS_PROVIDER}`)
-      }
-    }
-    const dbObject = { ...fields, ttsProvider }
+    const mapped = ttsType === undefined ? DEFAULT_TTS_PROVIDER : MONGO_TTS_PROVIDERS.get(ttsType)
+    if (mapped === undefined) logger.warn(`Guild ${serverID} has unknown TTS type "${ttsType}"; migrating to the default provider ${DEFAULT_TTS_PROVIDER}`)
+    const dbObject = { ...fields, ttsProvider: mapped ?? DEFAULT_TTS_PROVIDER }
     return prisma.serverConfig.upsert({
       where: { serverID },
       update: dbObject,

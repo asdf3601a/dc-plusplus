@@ -6,7 +6,7 @@ import { instances } from '../Utils/Instances'
 import { writeAtomic } from '../Utils/WriteAtomic'
 import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles } from './assets/steps'
 import { BACKUP_DIR, backup, RestoreError, restore } from './backup'
-import { importMongoDump, preflightMongoDump } from './import-mongo'
+import { importMongoDump, MONGO_TTS_PROVIDERS, preflightMongoDump } from './import-mongo'
 import { databasePath, readRecord, recordFilePath, type VersionRecord, writeRecord } from './record'
 import { databaseLock, migrationNames, unmappedTTSTypes } from './sqlite'
 
@@ -23,7 +23,7 @@ const MIGRATIONS_DIR = 'prisma/migrations'
 // Rewrites existing rows (ttsType -> ttsProvider); unmapped values are logged before it runs
 const TTS_PROVIDER_MIGRATION = '20261030120000_tts_provider'
 // The ttsType values it maps, and the provider it writes for any other value (its CASE ... ELSE)
-const MAPPED_TTS_TYPES = ['WaveNet', 'Legacy']
+const MAPPED_TTS_TYPES = [...MONGO_TTS_PROVIDERS.keys()]
 const UNMAPPED_TTS_PROVIDER = 'google-cloud'
 
 const logger = instances.mainLogger.getSubLogger({ name: 'DataMigration' })

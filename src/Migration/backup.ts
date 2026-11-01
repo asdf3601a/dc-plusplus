@@ -109,7 +109,7 @@ function sha256(path: string) {
 
 function appVersion() {
   try {
-    return String(JSON.parse(readFile(resolve(__dirname, '../../package.json'), { encoding: 'utf-8' })).version)
+    return String(require('../../package.json').version)
   } catch {
     return 'unknown'
   }
