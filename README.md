@@ -88,6 +88,8 @@ If a refresh fails, or `xai-oauth.json` is not a valid login, the bot logs an er
 }
 ```
 
+After upgrading, the first start exits; check `config.json` and start again.
+
 The TTS file is:
 
 ```json

@@ -38,7 +38,7 @@ export const loggerOptions: ISettingsParam<ILogObj> = {
 }
 
 export class Config {
-  private configVersion = 3
+  private configVersion = 4
   private _discord: DiscordConfig
   private _googleTTS: GoogleTTSConfig
   private _xaiTTS: XaiTTSConfig
