@@ -126,7 +126,7 @@ export async function backup({
   rawDatabase = false,
   dirs = [],
   files,
-  baseDir = BACKUP_DIR,
+  baseDir,
   reason,
   dataVersion
 }: {
@@ -134,7 +134,7 @@ export async function backup({
   rawDatabase?: boolean
   dirs?: string[]
   files: string[]
-  baseDir?: string
+  baseDir: string
   reason: Manifest['reason']
   dataVersion: number | null
 }) {
@@ -242,7 +242,7 @@ export function readBackup(dir: string): { manifest?: Manifest; problems: string
 // backed-up directories that the backup does not have, copies each file back (via a temporary file and
 // a rename) and checks the result. Returns that backup of the replaced data.
 // Throws a RestoreError saying what was changed.
-export async function restore(dir: string, { baseDir = BACKUP_DIR, dataVersion }: { baseDir?: string; dataVersion: number | null }) {
+export async function restore(dir: string, { baseDir, dataVersion }: { baseDir: string; dataVersion: number | null }) {
   const { manifest, problems } = readBackup(dir)
   if (!manifest || problems.length > 0) throw new RestoreError(`${dir} cannot be restored, nothing was changed: ${problems.join('; ')}`)
   const holder = manifest.dirs.find((path) => isInside(dir, path))

@@ -25,7 +25,6 @@ const TTS_PROVIDER_MIGRATION = '20261030120000_tts_provider'
 // The ttsType values it maps, and the provider it writes for any other value (its CASE ... ELSE)
 const MAPPED_TTS_TYPES = ['WaveNet', 'Legacy']
 const UNMAPPED_TTS_PROVIDER = 'google-cloud'
-const MIGRATE_HINT = 'Run `pnpm migrate` first'
 
 const logger = instances.mainLogger.getSubLogger({ name: 'DataMigration' })
 
@@ -275,7 +274,7 @@ export async function checkData(): Promise<boolean> {
   const problems = outdatedReasons(await pendingMigrations(), record, `no data version recorded in ${path}`, dump)
   if (problems.length === 0) return true
 
-  logger.error(`Data is not up to date (${problems.join('; ')}). ${MIGRATE_HINT}`)
+  logger.error(`Data is not up to date (${problems.join('; ')}). Run \`pnpm migrate\` first`)
   return false
 }
 
