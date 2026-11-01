@@ -10,7 +10,6 @@ interface XaiTokens {
   accessToken: string
   refreshToken: string
   expiresAt: number
-  lifetime: number
 }
 
 // Fixed path in the project root (cwd), same as config.json. Not configurable, so pnpm xai:login and the bot must
@@ -29,8 +28,7 @@ export async function xaiEndpoints(): Promise<{ deviceEndpoint: string; tokenEnd
 
 // A refresh response without a refresh_token keeps the previous one
 function tokensFrom(data: Record<string, unknown>, refreshToken?: string): XaiTokens {
-  const lifetime = Number(data.expires_in) * 1000
-  const tokens = { accessToken: data.access_token, refreshToken: data.refresh_token ?? refreshToken, expiresAt: Date.now() + lifetime, lifetime }
+  const tokens = { accessToken: data.access_token, refreshToken: data.refresh_token ?? refreshToken, expiresAt: Date.now() + Number(data.expires_in) * 1000 }
   if (!validTokens(tokens)) {
     throw new Error('xAI token response is missing access_token, refresh_token or expires_in')
   }
@@ -48,8 +46,7 @@ function validTokens(tokens: Record<string, unknown> | null): tokens is Record<s
     tokens.accessToken !== '' &&
     typeof tokens.refreshToken === 'string' &&
     tokens.refreshToken !== '' &&
-    Number.isFinite(tokens.expiresAt) &&
-    Number.isFinite(tokens.lifetime)
+    Number.isFinite(tokens.expiresAt)
   )
 }
 
@@ -61,10 +58,9 @@ function readTokens(): XaiTokens {
   return tokens
 }
 
-// Skew by lifetime, not remaining time, so a token shorter than the long skew never looks "about to expire" its whole life
-function expiring({ expiresAt, lifetime }: XaiTokens) {
-  const longSkew = 60 * 60_000
-  return expiresAt - Date.now() < (lifetime < longSkew ? 2 * 60_000 : longSkew)
+// Under 5 minutes left: long enough for one synthesis to finish before the token expires
+function expiring({ expiresAt }: XaiTokens) {
+  return expiresAt - Date.now() < 5 * 60_000
 }
 
 // One refresh at a time across processes through xai-oauth.json.lock: xAI refresh tokens are single-use, so a second refresh with the same one fails with invalid_grant
