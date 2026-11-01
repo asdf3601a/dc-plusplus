@@ -6,6 +6,7 @@ export interface ConfigValue {
   configVersion: string | number
   discord: DiscordConfig
   googleTTS: GoogleTTSConfig
+  xaiTTS: XaiTTSConfig
   sqlite: SQLiteConfig
   debug: boolean
 }
@@ -19,6 +20,12 @@ export interface DiscordConfig {
 
 export interface GoogleTTSConfig {
   apiKey: string
+}
+
+export interface XaiTTSConfig {
+  apiKey: string
+  voice: string
+  language: string
 }
 
 export interface SQLiteConfig {
@@ -36,6 +43,7 @@ export class Config {
   private configVersion = 3
   private _discord: DiscordConfig
   private _googleTTS: GoogleTTSConfig
+  private _xaiTTS: XaiTTSConfig
   private _sqlite: SQLiteConfig
   private _debug: boolean
   private logger: Logger<ILogObj>
@@ -47,6 +55,7 @@ export class Config {
     admins: []
   }
   private readonly googleTTSDefault = { apiKey: '' }
+  private readonly xaiTTSDefault = { apiKey: '', voice: '', language: '' }
   private readonly sqliteDefault = { databaseUrl: 'file:./prisma/voice-log.db' }
 
   constructor(mainLogger: Logger<ILogObj>) {
@@ -67,6 +76,9 @@ export class Config {
       if (!config.googleTTS) config.googleTTS = {}
       this._googleTTS = this.mergeGoogleTTSConfig(config)
 
+      if (!config.xaiTTS) config.xaiTTS = {}
+      this._xaiTTS = this.mergeXaiTTSConfig(config)
+
       if (!config.sqlite) config.sqlite = {}
       this._sqlite = {
         databaseUrl: config.sqlite.databaseUrl ? config.sqlite.databaseUrl : this.sqliteDefault.databaseUrl
@@ -83,6 +95,7 @@ export class Config {
       this.logger.info('Generating empty config...')
       this._discord = this.discordDefault
       this._googleTTS = this.googleTTSDefault
+      this._xaiTTS = this.xaiTTSDefault
       this._sqlite = this.sqliteDefault
       this._debug = false
       this.save()
@@ -125,6 +138,14 @@ export class Config {
     } as GoogleTTSConfig
   }
 
+  private mergeXaiTTSConfig(config: { xaiTTS: Partial<XaiTTSConfig> }) {
+    return {
+      apiKey: config.xaiTTS.apiKey ? config.xaiTTS.apiKey : this.xaiTTSDefault.apiKey,
+      voice: config.xaiTTS.voice ? config.xaiTTS.voice : this.xaiTTSDefault.voice,
+      language: config.xaiTTS.language ? config.xaiTTS.language : this.xaiTTSDefault.language
+    } as XaiTTSConfig
+  }
+
   private backupAndQuit(config: ConfigValue) {
     if (!config.configVersion) config.configVersion = 'legacy'
     let copyConfigName = `./config-${config.configVersion}.json`
@@ -153,6 +174,7 @@ export class Config {
         configVersion: this.configVersion,
         discord: this._discord,
         googleTTS: this._googleTTS,
+        xaiTTS: this._xaiTTS,
         sqlite: this._sqlite,
         debug: this._debug
       },
@@ -168,6 +190,10 @@ export class Config {
 
   public get googleTTS() {
     return this._googleTTS
+  }
+
+  public get xaiTTS() {
+    return this._xaiTTS
   }
 
   public get sqlite() {
