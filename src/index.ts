@@ -1,7 +1,7 @@
 import { Status } from 'status-client'
 import { Discord } from './Core/Discord/Core'
 import { SQLiteCore } from './Core/SQLite/Core'
-import { checkData } from './Migration'
+import { checkData, warnRemovedDumpEnv } from './Migration'
 import { EXIT_NO_RESTART } from './Utils/ExitCode'
 import { instances } from './Utils/Instances'
 
@@ -14,6 +14,7 @@ if (instances.config.debug) instances.mainLogger.settings.minLevel = 0 // Silly
 const status = new Status('VoiceLog')
 
 async function main() {
+  warnRemovedDumpEnv()
   if (!(await checkData())) process.exit(EXIT_NO_RESTART)
 
   // Initialize SQLite

@@ -81,6 +81,13 @@ export async function migrate({
   return (await migrateData({ skipInvalid })) || failed(run)
 }
 
+// MONGODB_DUMP_PATH was replaced by --mongo-dump; only warn, so a leftover setting does not stop an upgrade
+export function warnRemovedDumpEnv() {
+  if (process.env.MONGODB_DUMP_PATH !== undefined) {
+    logger.warn('MONGODB_DUMP_PATH is no longer read; pass the dump with `pnpm migrate --mongo-dump <path>`')
+  }
+}
+
 // Logs how to undo a run that failed after it started changing data; returns false
 function failed({ yolo, backupDir }: RunState) {
   if (backupDir !== undefined) logger.error(`To undo this run, stop the bot and run \`pnpm migrate --restore ${backupDir}\` (the backup made before it changed anything)`)

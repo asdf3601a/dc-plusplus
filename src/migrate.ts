@@ -1,7 +1,7 @@
 // Entry point of `pnpm migrate`: parses the options and runs the migration (see Migration/index.ts), or
 // with --restore puts a backup back. Running it from here, not from the package.json script, passes
 // options such as --skip-invalid to every step.
-import { migrate, restoreBackup } from './Migration'
+import { migrate, restoreBackup, warnRemovedDumpEnv } from './Migration'
 import { instances } from './Utils/Instances'
 
 const OPTIONS = ['--preflight', '--skip-invalid', '--yolo', '--backup-dir <path>', '--restore <path>', '--mongo-dump <path>']
@@ -43,6 +43,7 @@ async function run() {
     return false
   }
   if (restoreDir !== undefined) return restoreBackup({ dir: restoreDir, backupDir })
+  warnRemovedDumpEnv()
   return migrate({ preflight: flags.has('--preflight'), skipInvalid: flags.has('--skip-invalid'), yolo: flags.has('--yolo'), backupDir, mongoDump })
 }
 

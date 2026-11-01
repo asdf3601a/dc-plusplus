@@ -127,5 +127,5 @@ Users with existing MongoDB data can migrate by providing a JSON dump:
 
 1. Export MongoDB data to a JSON file (e.g., `mongo_dump.json`).
 2. Place the dump file in the project root.
-3. Start the bot; the migration will be performed automatically during the boot sequence.
-   *Note: Custom dump paths can be specified by passing the `MONGODB_DUMP_PATH` environment variable during launch.*
+3. Run `pnpm migrate`; it imports the dump into SQLite (the bot does not migrate on its own and refuses to start while the dump is waiting to be imported).
+   *Note: A dump at another path can be imported with `pnpm migrate --mongo-dump <path>`. The `MONGODB_DUMP_PATH` environment variable was removed; it is no longer read and only logs a warning.*
