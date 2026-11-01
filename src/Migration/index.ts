@@ -8,7 +8,7 @@ import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles } from './assets/steps'
 import { BACKUP_DIR, backup, RestoreError, restore } from './backup'
 import { importMongoDump, preflightMongoDump } from './import-mongo'
 import { databasePath, readRecord, recordFilePath, writeRecord } from './record'
-import { appliedMigrations, databaseLock, failedMigrations, unmappedTTSTypes } from './sqlite'
+import { databaseLock, migrationNames, unmappedTTSTypes } from './sqlite'
 
 // Version of the app-side data format (assets/<id>.json). The database is versioned by Prisma's
 // migration history instead. Bump it only for a breaking change, at most once per PR, and add exactly
@@ -203,7 +203,7 @@ function deployDatabaseMigrations() {
 function databaseStateAfterFailure() {
   let failedNames: string[]
   try {
-    failedNames = failedMigrations(databasePath())
+    failedNames = migrationNames(databasePath(), 'failed')
   } catch (error) {
     return `the state of the database is unknown (${error instanceof Error ? error.message : error})`
   }
@@ -375,6 +375,6 @@ async function pendingMigrations() {
   if (!exists(databasePath())) return all
   // better-sqlite3 (see sqlite.ts): _prisma_migrations is not a Prisma model, and the Prisma client
   // creates the database directory, which --preflight must not do
-  const appliedNames = new Set(appliedMigrations(databasePath()))
+  const appliedNames = new Set(migrationNames(databasePath(), 'applied'))
   return all.filter((name) => !appliedNames.has(name))
 }

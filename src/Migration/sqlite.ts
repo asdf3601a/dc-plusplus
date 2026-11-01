@@ -11,7 +11,7 @@ import Database from 'better-sqlite3'
 // How long `pnpm migrate` waits for another connection to release the database: 5 tries, 2 s apart
 const LOCK_TRIES = 5
 const LOCK_RETRY_MS = 2000
-// Busy timeout for the backup copy, which only needs to read
+// Busy timeout for the readonly connections (backup copy and reads)
 const READ_TIMEOUT_MS = 10_000
 
 // SQLITE_BUSY, or one of its extended codes (SQLITE_BUSY_RECOVERY, ...)
@@ -20,14 +20,19 @@ function isBusy(error: unknown) {
   return error.code === 'SQLITE_BUSY' || error.code.startsWith('SQLITE_BUSY_')
 }
 
-// A consistent copy of the database at path in dest, even while the bot is using it
-export function vacuumInto(path: string, dest: string) {
+// Runs read on a readonly connection to the database at path, closing it afterwards
+function readOnly<T>(path: string, read: (db: Database.Database) => T): T {
   const db = new Database(path, { readonly: true, timeout: READ_TIMEOUT_MS })
   try {
-    db.prepare('VACUUM INTO ?').run(dest)
+    return read(db)
   } finally {
     db.close()
   }
+}
+
+// A consistent copy of the database at path in dest, even while the bot is using it
+export function vacuumInto(path: string, dest: string) {
+  readOnly(path, (db) => db.prepare('VACUUM INTO ?').run(dest))
 }
 
 // PRAGMA integrity_check of the database file at path (and its -wal next to it), run on a copy in a
@@ -86,46 +91,27 @@ export async function databaseLock(path: string, onRetry: (attempt: number, trie
   }
 }
 
-// Names of the Prisma migrations recorded as failed: started, not finished, not marked rolled back.
-// Empty when the database or the history table does not exist.
-export function failedMigrations(path: string): string[] {
+// Names of the Prisma migrations the database has finished applying ("applied") or recorded as failed
+// (started, not finished: "failed"), not marked rolled back. Empty when the database or the history
+// table does not exist.
+export function migrationNames(path: string, state: 'applied' | 'failed'): string[] {
   if (!exists(path)) return []
-  const db = new Database(path, { readonly: true, timeout: READ_TIMEOUT_MS })
-  try {
-    const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_prisma_migrations'").all()
-    if (table.length === 0) return []
-    const rows = db.prepare('SELECT migration_name AS name FROM _prisma_migrations WHERE finished_at IS NULL AND rolled_back_at IS NULL').all() as { name: string }[]
-    return rows.map((row) => row.name)
-  } finally {
-    db.close()
-  }
-}
-
-// Names of the Prisma migrations the database has finished applying (not marked rolled back). Empty when
-// the database or the history table does not exist.
-export function appliedMigrations(path: string): string[] {
-  if (!exists(path)) return []
-  const db = new Database(path, { readonly: true, timeout: READ_TIMEOUT_MS })
-  try {
+  return readOnly(path, (db) => {
     if (!hasTable(db, '_prisma_migrations')) return []
-    const rows = db.prepare('SELECT migration_name AS name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL').all() as { name: string }[]
+    const finished = state === 'applied' ? 'IS NOT NULL' : 'IS NULL'
+    const rows = db.prepare(`SELECT migration_name AS name FROM _prisma_migrations WHERE finished_at ${finished} AND rolled_back_at IS NULL`).all() as { name: string }[]
     return rows.map((row) => row.name)
-  } finally {
-    db.close()
-  }
+  })
 }
 
 // serverConfig rows whose ttsType is not one of mapped. Empty when the database or the table does not exist.
 export function unmappedTTSTypes(path: string, mapped: readonly string[]): { serverID: string; ttsType: string }[] {
   if (!exists(path)) return []
-  const db = new Database(path, { readonly: true, timeout: READ_TIMEOUT_MS })
-  try {
+  return readOnly(path, (db) => {
     if (!hasTable(db, 'serverConfig')) return []
     const placeholders = mapped.map(() => '?').join(', ')
     return db.prepare(`SELECT serverID, ttsType FROM serverConfig WHERE ttsType NOT IN (${placeholders})`).all(...mapped) as { serverID: string; ttsType: string }[]
-  } finally {
-    db.close()
-  }
+  })
 }
 
 function hasTable(db: Database.Database, name: string) {
