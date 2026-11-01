@@ -63,22 +63,15 @@ function expiring({ expiresAt, lifetime }: XaiTokens) {
   return expiresAt - Date.now() < (lifetime < longSkew ? 2 * 60_000 : longSkew)
 }
 
-let refreshing: Promise<string> | undefined
-
-// One refresh at a time, in this process and across processes through xai-oauth.json.lock: xAI refresh
-// tokens are single-use, so a second refresh with the same one fails with invalid_grant
+// One refresh at a time across processes through xai-oauth.json.lock: xAI refresh tokens are single-use, so a second refresh with the same one fails with invalid_grant
 export async function xaiAccessToken(): Promise<string> {
   const tokens = readTokens()
   if (!expiring(tokens)) return tokens.accessToken
-  refreshing ??= refresh().finally(() => {
-    refreshing = undefined
-  })
-  return refreshing
+  return refresh()
 }
 
 async function refresh() {
   const lock = `${XAI_TOKEN_FILE}.lock`
-  const started = Date.now()
   let handle: Awaited<ReturnType<typeof open>> | undefined
   while (!handle) {
     try {
@@ -88,7 +81,6 @@ async function refresh() {
       // A lock left by a process that died mid-refresh; a live refresh holds it at most 40 s (two 20 s requests)
       const lockedAt = (await stat(lock).catch(() => undefined))?.mtimeMs ?? 0
       if (Date.now() - lockedAt > 60_000) await rm(lock, { force: true })
-      else if (Date.now() - started > 60_000) throw new Error(`timed out waiting for ${lock}`)
       else await sleep(100)
     }
   }

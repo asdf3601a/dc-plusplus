@@ -1,6 +1,5 @@
 import { existsSync as exists } from 'node:fs'
 import type { ILogObj, Logger } from 'tslog'
-import type { XaiTTSConfig } from '../../Utils/Config'
 import { XAI_TOKEN_FILE, xaiAccessToken } from '../../Utils/XaiOAuth'
 import { fetchWithRetry } from '../FetchWithRetry'
 import type { SynthesisSignal, TTSProvider } from '../TTSProvider'
@@ -12,20 +11,19 @@ export class XaiTTS implements TTSProvider {
   public readonly format = 'pcm'
   public readonly usesVoice = true
   private logger: Logger<ILogObj>
-  private config: () => XaiTTSConfig
+  private apiKey: () => string
 
-  constructor(config: () => XaiTTSConfig, logger: Logger<ILogObj>) {
-    this.config = config
+  constructor(apiKey: () => string, logger: Logger<ILogObj>) {
+    this.apiKey = apiKey
     this.logger = logger.getSubLogger({ name: 'XaiTTS' })
   }
 
   public unavailableReason() {
-    const { apiKey } = this.config()
-    return apiKey || exists(XAI_TOKEN_FILE) ? undefined : 'xaiTTS.apiKey is not set in config.json and there is no xAI login (run `pnpm xai:login`)'
+    return this.apiKey() || exists(XAI_TOKEN_FILE) ? undefined : 'xaiTTS.apiKey is not set in config.json and there is no xAI login (run `pnpm xai:login`)'
   }
 
   public async synthesize(text: string, lang: string, voice: string, signal: SynthesisSignal): Promise<Uint8Array | null> {
-    const { apiKey } = this.config()
+    const apiKey = this.apiKey()
     let token = apiKey
     try {
       token ||= await xaiAccessToken()
@@ -51,9 +49,8 @@ export class XaiTTS implements TTSProvider {
       }
       const type = res.headers.get('content-type') ?? ''
       const body = await res.arrayBuffer()
-      // A 200 can still be an error body; xAI's actual content-type for pcm is unconfirmed, so only an
-      // error-shaped type (json/text/html/xml) is rejected, not an audio type we did not anticipate
-      if (/json|text|html|xml/i.test(type) || body.byteLength % 2 !== 0) {
+      // A 200 can still be an error body; reject error-shaped types, since xAI's pcm content-type is unconfirmed
+      if (/json|text|html|xml/i.test(type)) {
         this.logger.error(`xAI TTS returned no usable pcm (${type || 'no content type'}, ${body.byteLength} bytes)`)
         return null
       }

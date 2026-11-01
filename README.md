@@ -74,24 +74,7 @@ If you want to use the new google cloud text to speech, be sure to have apiKey i
 ```
 `lang` and `voice` available from https://cloud.google.com/text-to-speech/docs/voices
 
-For xAI text to speech, use `"provider": "xai"` with the same fields. Set `xaiTTS.apiKey` in the config, or sign in once with `pnpm xai:login`. The login uses the Grok CLI's public OAuth client and prints a link and a code to approve in the browser. Run it from the project root after `pnpm build`.
-
-The API key is used whenever it is set. The login is written to `xai-oauth.json` in the project root (mode 0600), with the access and refresh tokens. Treat `xaiTTS.apiKey` and `xai-oauth.json` like passwords: do not commit or share them. Delete `xai-oauth.json` to sign out. The bot refreshes the token itself; refreshes coordinate through `xai-oauth.json.lock`.
-
-If a refresh fails, or `xai-oauth.json` is not a valid login, the bot logs an error asking you to run `pnpm xai:login` again and skips that text; it keeps running. With the login, a 401 means the token was revoked: run `pnpm xai:login` again, and a 403 means the login can't use the API: set `xaiTTS.apiKey` instead. A 429, a 5xx or a network error is retried up to twice, within the 30 second limit for that text.
-
-`lang` is an [xAI language code](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#supported-languages) or `auto`, and `voice` is an [xAI voice](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#voices) (built-in such as `eve`, or a custom voice ID). Both are sent as given. An empty `voice` lets xAI pick its default. When a server's `/voice tts` switches to xai, also set `voice_lang` and `voice_name` to xAI values. In the config, `xaiTTS` is only the API key:
-
-```json
-{
-  "apiKey": ""
-}
-```
-
-After upgrading, the first start exits; check `config.json` and start again.
-
-The TTS file is:
-
+If you want to use xAI text to speech, set `xaiTTS.apiKey` in the config, or run `pnpm build` and then `pnpm xai:login` in the project root to sign in once in the browser, and json content is:
 ```json
 {
   "provider": "xai",
@@ -103,6 +86,11 @@ The TTS file is:
   "switched_in": "<Text when switched into to the channel>"
 }
 ```
+`lang` is an [xAI language code](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#supported-languages) or `auto`, and `voice` is an [xAI voice](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#voices) such as `eve` or a custom voice ID. Both are sent as given; an empty `voice` uses xAI's default. When a server's `/voice tts` switches to xai, set `voice_lang` and `voice_name` to xAI values too.
+
+The API key wins when set. The login is saved to `xai-oauth.json` in the project root (mode 0600) and refreshed by the bot; keep it private and delete it to sign out. If the login stops working, the bot logs an error and skips that text: run `pnpm xai:login` again, or set `xaiTTS.apiKey` if xAI answers 403.
+
+The first start after upgrading to config version 4 saves the old file as `config-3.json` and exits; check `config.json` and start again.
 
 Files in the old format (`use_wave_tts` instead of `provider`) are converted by `pnpm migrate` when upgrading to [data version](docs/UPGRADING.md#data-version) 2; see the [TTS provider migration guide](docs/migration/TTS_PROVIDER_MIGRATION.md). Files added later must use `provider`; files without a usable `provider` are skipped with an error.
 

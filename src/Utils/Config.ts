@@ -75,7 +75,9 @@ export class Config {
       this._googleTTS = this.mergeGoogleTTSConfig(config)
 
       if (!config.xaiTTS) config.xaiTTS = {}
-      this._xaiTTS = this.mergeXaiTTSConfig(config)
+      this._xaiTTS = {
+        apiKey: config.xaiTTS.apiKey ? config.xaiTTS.apiKey : this.xaiTTSDefault.apiKey
+      }
 
       if (!config.sqlite) config.sqlite = {}
       this._sqlite = {
@@ -134,12 +136,6 @@ export class Config {
     return {
       apiKey: config.googleTTS.apiKey ? config.googleTTS.apiKey : config.googleAPIKey ? config.googleAPIKey : this.googleTTSDefault.apiKey
     } as GoogleTTSConfig
-  }
-
-  private mergeXaiTTSConfig(config: { xaiTTS: Partial<XaiTTSConfig> }) {
-    return {
-      apiKey: config.xaiTTS.apiKey ? config.xaiTTS.apiKey : this.xaiTTSDefault.apiKey
-    } as XaiTTSConfig
   }
 
   private backupAndQuit(config: ConfigValue) {

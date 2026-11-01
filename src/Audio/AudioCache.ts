@@ -52,8 +52,7 @@ export class AudioCache {
   }
 
   private pathFor(provider: TTSProvider, text: string, lang: string, voice = ''): string {
-    const key = provider.cacheKey?.(text, lang, voice) ?? `${text}-${lang}-${voice}`
-    return `${this.dir}/${createHash('md5').update(`${provider.id}:${key}`).digest('hex')}.${EXTENSIONS[provider.format]}`
+    return `${this.dir}/${createHash('md5').update(`${provider.id}:${text}-${lang}-${voice}`).digest('hex')}.${EXTENSIONS[provider.format]}`
   }
 
   // Resolves to the cached file path, synthesizing it on a miss; null when synthesis failed.
@@ -168,7 +167,7 @@ export class AudioCache {
           if (late) this.logger?.warn(`${provider.id} finished "${text}" after the time limit; discarded`)
         })
         .catch(() => {
-          // A rejection after the timeout is already logged above; nothing is waiting on this promise
+          // Nothing waits on it any more; this only stops an unhandled rejection
         })
       return null
     }
