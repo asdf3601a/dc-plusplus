@@ -1,0 +1,372 @@
+import { spawnSync } from 'node:child_process'
+import { existsSync as exists, readdirSync as readDir, readFileSync as readFile } from 'node:fs'
+import { resolve } from 'node:path'
+import { EXIT_NO_RESTART } from '../Utils/ExitCode'
+import { instances } from '../Utils/Instances'
+import { writeAtomic } from '../Utils/WriteAtomic'
+import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles } from './assets/steps'
+import { BACKUP_DIR, backup, RestoreError, restore } from './backup'
+import { importMongoDump, MONGO_TTS_PROVIDERS, preflightMongoDump } from './import-mongo'
+import { databasePath, readRecord, recordFilePath, type VersionRecord, writeRecord } from './record'
+import { databaseLocked, migrationNames, unmappedTTSTypes } from './sqlite'
+
+// Version of the app-side data format (assets/<id>.json). The database is versioned by Prisma's
+// migration history instead. Bump it only for a breaking change, at most once per PR, and add exactly
+// one step for the bump to ASSET_STEPS.
+export const DATA_VERSION = 2
+
+// MongoDB export that `pnpm migrate` imports into SQLite whenever it exists (`--mongo-dump <path>` for
+// another path), deleting it afterwards; the bot refuses to start while it exists
+export const DEFAULT_MONGODB_DUMP = './mongo_dump.json'
+
+const MIGRATIONS_DIR = 'prisma/migrations'
+// Rewrites existing rows (ttsType -> ttsProvider); unmapped values are logged before it runs
+const TTS_PROVIDER_MIGRATION = '20261030120000_tts_provider'
+// The ttsType values it maps, and the provider it writes for any other value (its CASE ... ELSE)
+const MAPPED_TTS_TYPES = [...MONGO_TTS_PROVIDERS.keys()]
+const UNMAPPED_TTS_PROVIDER = 'google-cloud'
+
+const logger = instances.mainLogger.getSubLogger({ name: 'DataMigration' })
+
+// What a `pnpm migrate` run has done so far, for the message on a failure
+type RunState = { yolo: boolean; backupDir?: string }
+
+// `pnpm migrate`: checks the data version record and the assets (preflight), waits until no other
+// connection holds the database locked, and stops there, changing nothing and making no backup, when
+// there is nothing to migrate (see outdatedReasons). Otherwise backs up what it will change (unless yolo)
+// to a new directory in backupDir, applies the database migrations (`prisma migrate deploy`), imports the MongoDB dump at
+// mongoDump (or DEFAULT_MONGODB_DUMP if it exists when not given), then upgrades the app-side data. With preflight it stops after the check, having only
+// read. Returns false on failure, after saying what was changed and how to restore the backup.
+export async function migrate({
+  preflight = false,
+  skipInvalid = false,
+  yolo = false,
+  backupDir,
+  mongoDump
+}: {
+  preflight?: boolean
+  skipInvalid?: boolean
+  yolo?: boolean
+  backupDir?: string
+  mongoDump?: string
+}) {
+  // A path given with --mongo-dump must exist; the default one is imported only when it does
+  if (mongoDump !== undefined && !exists(mongoDump)) {
+    logger.error(`MongoDB dump ${mongoDump} (--mongo-dump) not found; nothing was changed`)
+    return false
+  }
+  const dumpPath = mongoDump ?? (exists(DEFAULT_MONGODB_DUMP) ? DEFAULT_MONGODB_DUMP : undefined)
+  const record = readUsableRecord(recordFilePath(), 'nothing was changed')
+  if (!record || !preflightData(record, { skipInvalid })) return false
+  if (dumpPath !== undefined && !preflightMongoDump(dumpPath)) return false
+  if (preflight) return true
+  if (!(await databaseUnlocked('nothing was changed'))) return false
+  const pending = await pendingMigrations()
+  const reasons = outdatedReasons(pending, record, 'no data version recorded', dumpPath === undefined ? undefined : `MongoDB dump ${dumpPath}`)
+  if (reasons.length === 0) {
+    const unused = [...(yolo ? ['--yolo'] : []), ...(backupDir !== undefined ? ['--backup-dir'] : [])]
+    if (unused.length > 0) {
+      logger.error(`Nothing to migrate, so no backup is made and ${unused.join(' and ')} cannot be used; nothing was changed`)
+      return false
+    }
+    logger.info(`Nothing to migrate (database migrations applied, data version ${DATA_VERSION}, no MongoDB dump); no backup was made`)
+    return true
+  }
+  logger.info(`To migrate: ${reasons.join('; ')}`)
+  const run: RunState = { yolo }
+  const dataVersion = record.kind === 'ok' ? record.version : null
+  if (!(await backupData({ yolo, dumpPath, backupDir: backupDir ?? BACKUP_DIR, dataVersion, run }))) return false
+  if (pending.includes(TTS_PROVIDER_MIGRATION)) logUnmappedTTSTypes()
+  if (!deployDatabaseMigrations()) return failed(run)
+  if (dumpPath !== undefined && !(await importMongoDump(dumpPath))) {
+    logger.error('The database migrations of this run were applied; assets/*.json and data-version.json were not changed')
+    return failed(run)
+  }
+  return (await migrateData(record, { skipInvalid })) || failed(run)
+}
+
+// MONGODB_DUMP_PATH was replaced by --mongo-dump; only warn, so a leftover setting does not stop an upgrade
+export function warnRemovedDumpEnv() {
+  if (process.env.MONGODB_DUMP_PATH !== undefined) {
+    logger.warn('MONGODB_DUMP_PATH is no longer read; pass the dump with `pnpm migrate --mongo-dump <path>`')
+  }
+}
+
+// Logs how to undo a run that failed after it started changing data; returns false
+function failed({ yolo, backupDir }: RunState) {
+  if (backupDir !== undefined) logger.error(`To undo this run, stop the bot and run \`pnpm migrate --restore ${backupDir}\` (the backup made before it changed anything)`)
+  else if (yolo) logger.error('No backup was made (--yolo); restore your own backup to undo this run')
+  else logger.error('No backup was made: this run found no existing data to change')
+  return false
+}
+
+// `pnpm migrate --restore <dir>`: puts the data in the backup at dir back (see restore in backup.ts),
+// after backing up the data it replaces to a new directory in backupDir. Does not migrate. Returns false,
+// after saying what was changed, on failure.
+export async function restoreBackup({ dir, backupDir = BACKUP_DIR }: { dir: string; backupDir?: string }) {
+  if (!(await databaseUnlocked('nothing was restored'))) return false
+  try {
+    const { manifest, replaced } = await restore(dir, { baseDir: backupDir, dataVersion: currentDataVersion() })
+    logger.info(`Restored ${dir} (made ${manifest.createdAt} by version ${manifest.appVersion}, data version ${manifest.dataVersion ?? 'none'})`)
+    logger.info(`The data from before the restore is in ${replaced}; run \`pnpm migrate --restore ${replaced}\` to go back to it`)
+    logger.info('Nothing was migrated: run `pnpm migrate` to upgrade the restored data (the bot refuses to start until then), or run the version of the bot that matches it')
+    return true
+  } catch (error) {
+    if (error instanceof RestoreError) logger.error(error.message)
+    else logger.error(`Restoring ${dir} failed:`, error)
+    return false
+  }
+}
+
+function currentDataVersion() {
+  const record = readRecord(recordFilePath())
+  return record.kind === 'ok' ? record.version : null
+}
+
+// Waits a few seconds for another connection to release the database; if it does not, logs that it is
+// in use (with outcome) and returns false. True when there is no database yet.
+async function databaseUnlocked(outcome: string) {
+  const path = databasePath()
+  if (!exists(path)) return true
+  const locked = await databaseLocked(path, (attempt, tries, waitMs) => {
+    logger.warn(`The database ${path} is locked; trying again in ${waitMs / 1000} s (${attempt}/${tries})`)
+  })
+  if (!locked) return true
+  logger.error(
+    `The database ${path} is in use by another connection (the bot, another \`pnpm migrate\`, an sqlite3 shell or a database browser); ${outcome}. Close it and run it again`
+  )
+  return false
+}
+
+// Why the data is not up to date: pending, the unapplied Prisma migrations, a data version record that
+// is missing (noRecord) or older than DATA_VERSION, and dump, a MongoDB dump still to import. Empty when
+// it is, the only case in which `pnpm migrate` makes no backup.
+function outdatedReasons(pending: string[], record: UsableRecord, noRecord: string, dump: string | undefined) {
+  const reasons: string[] = []
+  if (pending.length > 0) reasons.push(`unapplied database migrations: ${pending.join(', ')}`)
+  if (record.kind !== 'ok') reasons.push(noRecord)
+  else if (record.version < DATA_VERSION) reasons.push(`data version ${record.version} is older than ${DATA_VERSION}`)
+  if (dump !== undefined) reasons.push(dump)
+  return reasons
+}
+
+// Run by `pnpm migrate` after the preflight, before anything is changed, when there is something to
+// migrate. Unless yolo (then it only warns),
+// backs up all the data: the database, every file in assets/, the record and the MongoDB dump at dumpPath
+// (deleted after the import), whatever this run changes. Makes no backup when none of
+// them exists yet (a fresh install). Returns false, having changed nothing, when the backup fails.
+async function backupData({ yolo, dumpPath, backupDir, dataVersion, run }: { yolo: boolean; dumpPath?: string; backupDir: string; dataVersion: number | null; run: RunState }) {
+  if (yolo) {
+    logger.warn('--yolo: no backup was made')
+    return true
+  }
+  const database = databasePath()
+  const files = [recordFilePath(), ...(dumpPath !== undefined ? [dumpPath] : [])]
+  if (!exists(database) && !exists(ASSETS_DIR) && !files.some((file) => exists(file))) return true
+  try {
+    // A path that does not exist (no database or record yet) is recorded as absent, so restoring
+    // deletes the one this run creates
+    run.backupDir = await backup({ database, dirs: [ASSETS_DIR], files, baseDir: backupDir, reason: 'migrate', dataVersion })
+    logger.info(`Backed up to ${resolve(run.backupDir)}; to undo this run, stop the bot and run \`pnpm migrate --restore ${run.backupDir}\``)
+    return true
+  } catch (error) {
+    logger.error('Backup failed; nothing was changed. Fix the problem and run `pnpm migrate` again, or run `pnpm migrate --yolo` to migrate without a backup:', error)
+    return false
+  }
+}
+
+// Before the tts_provider migration converts existing rows, logs every guild whose ttsType it maps to
+// the default provider because it is neither WaveNet nor Legacy
+function logUnmappedTTSTypes() {
+  // better-sqlite3 (see sqlite.ts): the generated client follows the new schema and has no ttsType
+  for (const row of unmappedTTSTypes(databasePath(), MAPPED_TTS_TYPES)) {
+    logger.warn(`Guild ${row.serverID} has unknown TTS type "${row.ttsType}"; migrating to the default provider ${UNMAPPED_TTS_PROVIDER}`)
+  }
+}
+
+// The Prisma CLI of this install, run with this node so it needs no shell or PATH entry. On a failure,
+// logs what state it left the database in.
+function deployDatabaseMigrations() {
+  const result = spawnSync(process.execPath, [require.resolve('prisma/build/index.js'), 'migrate', 'deploy'], { stdio: 'inherit' })
+  if (result.status === 0) return true
+  logger.error(
+    `prisma migrate deploy failed (${result.error ?? `exit ${result.status ?? result.signal}`}); ${databaseStateAfterFailure()}; assets/*.json and data-version.json were not changed`
+  )
+  return false
+}
+
+// What a failed `prisma migrate deploy` left: the migration Prisma recorded as failed, and whether its
+// SQL runs in a transaction (BEGIN ... COMMIT), so that its changes were rolled back
+function databaseStateAfterFailure() {
+  let failedNames: string[]
+  try {
+    failedNames = migrationNames(databasePath(), 'failed')
+  } catch (error) {
+    return `the state of the database is unknown (${error instanceof Error ? error.message : error})`
+  }
+  if (failedNames.length === 0) return 'no migration was recorded as failed, so Prisma stopped before changing the database'
+  const states = failedNames.map((name) => {
+    const file = `${MIGRATIONS_DIR}/${name}/migration.sql`
+    const sql = exists(file) ? readFile(file, { encoding: 'utf-8' }) : ''
+    const transactional = /^BEGIN( TRANSACTION)?;/m.test(sql) && /^COMMIT;/m.test(sql)
+    return transactional
+      ? `migration ${name} failed and its changes were rolled back (it runs in a transaction)`
+      : `migration ${name} failed and does not run in a transaction, so the database may be partly changed`
+  })
+  const resolveHint = failedNames.map((name) => `\`pnpm prisma migrate resolve --rolled-back ${name}\``).join(', ')
+  return `${states.join('; ')}; migrations before it stay applied. Prisma refuses to deploy again until you restore the backup, or fix the problem and run ${resolveHint}`
+}
+
+// Run by `pnpm migrate` after `prisma migrate deploy`. Converts assets/<id>.json up to DATA_VERSION and
+// records the version only when every file was converted; otherwise the record is left as it was, so
+// running it again finishes the job. An asset file that is not a JSON object fails the run before
+// anything is converted, unless skipInvalid leaves such files as they are. Returns false on failure.
+async function migrateData(record: UsableRecord, { skipInvalid = false } = {}): Promise<boolean> {
+  const path = recordFilePath()
+  if (record.kind === 'ok' && record.version === DATA_VERSION) {
+    logger.info(`Data is already at version ${DATA_VERSION}`)
+    return true
+  }
+
+  const files = assetConfigFiles()
+  if (record.kind === 'none' && files.length === 0) {
+    await writeRecord(path, DATA_VERSION)
+    logger.info(`Fresh install, data version ${DATA_VERSION} recorded in ${path}`)
+    return true
+  }
+
+  // No record but existing assets/<id>.json: the install predates data versions, so version 1
+  const from = record.kind === 'ok' ? record.version : 1
+  logger.info(`Upgrading data from version ${from} to ${DATA_VERSION}`)
+  const { pending, invalid } = planAssets(files, from, skipInvalid)
+  if (invalid.length > 0 && !skipInvalid) {
+    logInvalidAssets(invalid, `nothing was converted and data version is still ${from}`)
+    return false
+  }
+
+  let failed = 0
+  for (const { file, config } of pending) {
+    try {
+      await writeAtomic(`${ASSETS_DIR}/${file}`, `${JSON.stringify(config, null, 2)}\n`)
+      logger.info(`Migrated ${ASSETS_DIR}/${file} to provider ${config.provider}`)
+    } catch (error) {
+      failed++
+      logger.error(`Failed to migrate ${ASSETS_DIR}/${file}:`, error)
+    }
+  }
+  if (failed > 0) {
+    logger.error(`${failed} asset files could not be migrated; data version is still ${from}, run \`pnpm migrate\` again`)
+    return false
+  }
+
+  await writeRecord(path, DATA_VERSION)
+  logger.info(`Data version ${DATA_VERSION} recorded in ${path}`)
+  return true
+}
+
+// Run at bot startup; only reads. Returns false (after logging one error) when the bot must not start:
+// unapplied Prisma migrations, a missing or older data version, a MongoDB dump not imported yet, or a
+// malformed or newer record.
+export async function checkData(): Promise<boolean> {
+  const path = recordFilePath()
+  const record = readUsableRecord(path, 'refusing to start')
+  if (!record) return false
+
+  const dump = exists(DEFAULT_MONGODB_DUMP) ? `MongoDB dump ${DEFAULT_MONGODB_DUMP} not imported yet` : undefined
+  const problems = outdatedReasons(await pendingMigrations(), record, `no data version recorded in ${path}`, dump)
+  if (problems.length === 0) return true
+
+  logger.error(`Data is not up to date (${problems.join('; ')}). Run \`pnpm migrate\` first`)
+  return false
+}
+
+// Run by `pnpm migrate` before `prisma migrate deploy` (after readUsableRecord rejected a malformed
+// record or one newer than DATA_VERSION), so (unless skipInvalid) an invalid asset file that migrateData
+// would reject stops it before the database is touched. Only reads.
+function preflightData(record: UsableRecord, { skipInvalid = false } = {}): boolean {
+  if (skipInvalid || (record.kind === 'ok' && record.version === DATA_VERSION)) return true
+  const { invalid } = planAssets(assetConfigFiles(), record.kind === 'ok' ? record.version : 1, false)
+  if (invalid.length === 0) return true
+  logInvalidAssets(invalid, 'nothing was changed (the database was not migrated)')
+  return false
+}
+
+function logInvalidAssets(invalid: string[], outcome: string) {
+  logger.error(
+    `${invalid.length} asset files are not valid: ${invalid.join(', ')}; ${outcome}. Fix or remove them and run \`pnpm migrate\` again, or run \`pnpm migrate --skip-invalid\` to leave them unconverted`
+  )
+}
+
+// A data version record that is missing or at most DATA_VERSION
+type UsableRecord = Exclude<VersionRecord, { kind: 'invalid' }>
+
+// The record, or undefined (after logging an error ending in `outcome`) when it is malformed or newer
+// than DATA_VERSION, which nothing in this build may act on
+function readUsableRecord(path: string, outcome: string): UsableRecord | undefined {
+  const record = readRecord(path)
+  if (record.kind === 'invalid') {
+    logger.error(`${record.reason}; ${outcome}`)
+    return undefined
+  }
+  if (record.kind === 'ok' && record.version > DATA_VERSION) {
+    logger.error(`${path} says data version ${record.version}, newer than this build (${DATA_VERSION}); ${outcome}. Downgrades are not supported`)
+    return undefined
+  }
+  return record
+}
+
+// Runs the steps from `from` to DATA_VERSION on every file and returns the ones that changed, and the
+// paths of files that are not a JSON object (each logged, never converted).
+function planAssets(files: string[], from: number, skipInvalid: boolean) {
+  const pending: { file: string; config: Record<string, unknown> }[] = []
+  const invalid: string[] = []
+  const label = skipInvalid ? 'Skipping' : 'Invalid'
+  for (const file of files) {
+    const path = `${ASSETS_DIR}/${file}`
+    let config: unknown
+    try {
+      config = JSON.parse(readFile(path, { encoding: 'utf-8' }))
+    } catch (error) {
+      logger.error(`${label} ${path}: invalid JSON`, error)
+      invalid.push(path)
+      continue
+    }
+    if (typeof config !== 'object' || config === null || Array.isArray(config)) {
+      logger.error(`${label} ${path}: unsupported format (expected a JSON object)`)
+      invalid.push(path)
+      continue
+    }
+    let current = config as Record<string, unknown>
+    let changed = false
+    for (let version = from; version < DATA_VERSION; version++) {
+      const step = ASSET_STEPS[version]
+      if (!step) throw new Error(`No assets migration step from data version ${version}`)
+      const next = step(current)
+      if (next) {
+        current = next
+        changed = true
+      }
+    }
+    if (changed) pending.push({ file, config: current })
+  }
+  return { pending, invalid }
+}
+
+// Migrations in prisma/migrations that the database has not finished applying. Never creates the
+// database file. Exits with EXIT_NO_RESTART when prisma/migrations is missing.
+async function pendingMigrations() {
+  if (!exists(MIGRATIONS_DIR)) {
+    logger.error(
+      `${resolve(MIGRATIONS_DIR)} not found, so the database migrations cannot be checked; nothing was changed. Run it from the project directory, or restore ${MIGRATIONS_DIR} (\`git checkout -- ${MIGRATIONS_DIR}\`)`
+    )
+    process.exit(EXIT_NO_RESTART)
+  }
+  const all = readDir(MIGRATIONS_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+  if (!exists(databasePath())) return all
+  // better-sqlite3 (see sqlite.ts): _prisma_migrations is not a Prisma model, and the Prisma client
+  // creates the database directory, which --preflight must not do
+  const appliedNames = new Set(migrationNames(databasePath(), 'applied'))
+  return all.filter((name) => !appliedNames.has(name))
+}

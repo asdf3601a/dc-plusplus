@@ -1,15 +1,12 @@
 import { createHash } from 'node:crypto'
 import { existsSync } from 'node:fs'
-import { readdir, rename, rm, stat, unlink, utimes, writeFile } from 'node:fs/promises'
+import { readdir, stat, unlink, utimes } from 'node:fs/promises'
 import type { ILogObj, Logger } from 'tslog'
+import { TEMP_SUFFIX, writeAtomic } from '../Utils/WriteAtomic'
 import type { AudioFormat } from './AudioAsset'
 import type { TTSProvider } from './TTSProvider'
 
 const EXTENSIONS: Record<AudioFormat, string> = { ogg: 'opus', pcm: 'pcm' }
-const TEMP_SUFFIX = '.tmp'
-
-let tempCounter = 0
-
 // Files used this recently are never evicted, whatever the size and age limits, so a file that is
 // queued or playing (up to DEFAULT_PLAYBACK_TIMEOUT_MS, 2 minutes) is not deleted under the player
 export const RECENT_USE_MS = 10 * 60 * 1000
@@ -155,8 +152,9 @@ export class AudioCache {
   private async create(provider: TTSProvider, path: string, text: string, lang: string, voice: string): Promise<string | null> {
     const data = await provider.synthesize(text, lang, voice)
     if (data === null) return null
+    // A crash mid-write leaves only a *.tmp file, which never matches a cache key
     try {
-      await this.writeAtomic(path, data)
+      await writeAtomic(path, data)
     } catch (error) {
       // Same as a failed synthesis: log it and play nothing, never reject the caller
       this.logger?.error(`Failed to write cache file ${path}:`, error)
@@ -164,19 +162,6 @@ export class AudioCache {
     }
     this.scheduleEviction()
     return path
-  }
-
-  // The cache path only ever holds a complete file: a crash mid-write leaves just a *.tmp file,
-  // which never matches a cache key. The temp file must be in the same dir for rename to be atomic.
-  private async writeAtomic(path: string, data: Uint8Array) {
-    const temp = `${path}.${process.pid}.${++tempCounter}${TEMP_SUFFIX}`
-    try {
-      await writeFile(temp, data)
-      await rename(temp, path)
-    } catch (error) {
-      await rm(temp, { force: true })
-      throw error
-    }
   }
 }
 

@@ -1,10 +1,8 @@
-import { existsSync as exists } from 'node:fs'
 import { Status } from 'status-client'
-import { migrateAssets } from './Audio/AssetsMigration'
 import { Discord } from './Core/Discord/Core'
 import { SQLiteCore } from './Core/SQLite/Core'
-import { migrateMongoToSqlite } from './Core/SQLite/Migration'
-import { applyPendingMigrations } from './Core/SQLite/SchemaMigration'
+import { checkData, warnRemovedDumpEnv } from './Migration'
+import { EXIT_NO_RESTART } from './Utils/ExitCode'
 import { instances } from './Utils/Instances'
 
 let quitting = false
@@ -16,20 +14,12 @@ if (instances.config.debug) instances.mainLogger.settings.minLevel = 0 // Silly
 const status = new Status('VoiceLog')
 
 async function main() {
-  await applyPendingMigrations()
-  await migrateAssets(logger)
+  warnRemovedDumpEnv()
+  if (!(await checkData())) process.exit(EXIT_NO_RESTART)
 
   // Initialize SQLite
   const db = new SQLiteCore()
   instances.db = db
-
-  const dumpPath = process.env.MONGODB_DUMP_PATH ?? './mongo_dump.json'
-
-  if (exists(dumpPath)) {
-    // Attempt to migrate from MongoDB dump file if path is provided in .env
-    logger.info(`MongoDB dump found: ${dumpPath}. Attempting data migration...`)
-    await migrateMongoToSqlite(dumpPath)
-  }
 
   // Since SQLite/Prisma is synchronous initialization for the client
   // (connection is lazy), we can start the bot immediately.

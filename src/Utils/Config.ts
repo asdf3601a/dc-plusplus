@@ -1,5 +1,6 @@
 import { constants, copyFileSync as copyFile, existsSync as exists, readFileSync as readFile, writeFileSync as writeFile } from 'node:fs'
 import type { ILogObj, ISettingsParam, Logger } from 'tslog'
+import { EXIT_NO_RESTART } from './ExitCode'
 
 export interface ConfigValue {
   configVersion: string | number
@@ -86,7 +87,7 @@ export class Config {
       this._debug = false
       this.save()
       this.logger.info('Fill your config and try again.')
-      process.exit(1)
+      process.exit(EXIT_NO_RESTART)
     }
   }
 
@@ -94,7 +95,7 @@ export class Config {
     if (!version || version < this.configVersion) return true
     if (version > this.configVersion) {
       this.logger.fatal('This config version is newer than me! Consider upgrading to the latest version or reset your configuration.')
-      process.exit(1)
+      process.exit(EXIT_NO_RESTART)
     }
     return false
   }
@@ -142,7 +143,7 @@ export class Config {
     this.save()
 
     this.logger.warn('Detected config version change and we have tried to backup and migrate into it! Consider checking your config file.')
-    process.exit(1)
+    process.exit(EXIT_NO_RESTART)
   }
 
   private save() {

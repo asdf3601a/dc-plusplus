@@ -44,14 +44,7 @@ If you have an existing MongoDB database and want to move the data to the new SQ
 
    *The bot will exit immediately after backup and migrating config.*
 
-4. **Initialize SQLite Database**:
-   Run the following command to create the SQLite database and apply the initial schema:
-
-   ```bash
-   pnpm db:migrate
-   ```
-
-5. **Prepare MongoDB Dump**:
+4. **Prepare MongoDB Dump**:
    Export your MongoDB collection to a JSON file using `mongoexport`:
 
    ```bash
@@ -66,23 +59,25 @@ If you have an existing MongoDB database and want to move the data to the new SQ
    mongoexport --uri="mongodb://localhost:27017/VoiceLog" --collection=serverConfig --out=mongo_dump.json
    ```
 
-   Place the resulting `mongo_dump.json` file in the project root directory, and keep a copy elsewhere along with the database file and `assets/`: the bot changes them directly on start, makes no backups, and deletes the dump after importing it.
+   Place the resulting `mongo_dump.json` file in the project root directory. `pnpm migrate` first copies it (with the database file, if one exists, and `assets/`) to `backup/<YYYYMMDD-HHmmss-SSS>/`, and deletes it after importing. With `--yolo` no backup is made: keep a copy elsewhere.
 
-6. **Run Data Migration**:
-   Start the bot again. The bot will detect the `mongo_dump.json` and `config.json`, and perform the data migration to SQLite during the boot sequence:
-
-   ```bash
-   node dist
-   ```
-
-   *Note: If your dump file has a different name or location, you can pass the path via an environment variable when starting the bot:*
+5. **Run Data Migration**:
+   Run `pnpm migrate`. When it finds the dump, it checks that the dump parses and that every field has the right type, creates the SQLite database (or applies pending migrations), imports every document of `mongo_dump.json` in one transaction, deletes the dump, and then upgrades the rest of the data. Before changing anything it backs up the dump, the database file and `assets/` to `backup/<YYYYMMDD-HHmmss-SSS>/` (see [Backups](../UPGRADING.md#backups) for what is copied and how to restore it with `pnpm migrate --restore <path>`); if the backup fails it exits with an error before changing anything, and `pnpm migrate --yolo` skips the backup:
 
    ```bash
-   MONGODB_DUMP_PATH="./my_custom_dump.json" node dist
+   pnpm migrate
    ```
 
-7. **Verification**:
-   After the bot starts, check if the `voice-log.db` file contains the migrated data using Prisma Studio:
+   If the dump is invalid or the import fails, `pnpm migrate` exits with an error, nothing is imported and the dump stays where it is; fix the problem and run it again. Documents are upserted by `serverID`, so running it again with the same dump is safe. If only deleting the dump fails, the data is already imported: move the dump away yourself. After a successful import the dump is gone, so the next `pnpm migrate` has nothing to import and makes no backup for it. The bot never imports the dump on its own: while the dump file is present, `pnpm start` logs an error asking you to run `pnpm migrate` and exits with code 78.
+
+   *Note: If your dump file has a different name or location, pass it with `--mongo-dump`. If that file does not exist, `pnpm migrate` exits with code 1 before the backup, changing nothing (a missing `./mongo_dump.json` without the flag just means there is no dump). `pnpm start` only checks `./mongo_dump.json`.*
+
+   ```bash
+   pnpm migrate --mongo-dump ./my_custom_dump.json
+   ```
+
+6. **Verification**:
+   Check that the `voice-log.db` file contains the migrated data using Prisma Studio, then start the bot with `pnpm start`:
 
    ```bash
    pnpm db:studio

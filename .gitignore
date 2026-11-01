@@ -132,10 +132,16 @@ dist
 # project
 prisma/*.db
 prisma/*.db-journal
-assets/
+prisma/*.db-wal
+prisma/*.db-shm
+prisma/data-version.json
+/assets/
 logs/
 caches/
 config*.json
 vlogdata.json
 vlogdata.json.bak
 mongo*.json
+
+# database and assets backups made by pnpm migrate
+backup/

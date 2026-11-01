@@ -9,6 +9,8 @@
   "author": "Jim Chen <jimchen5209@gmail.com>",
   "license": "AGPL-3.0-only",
   "scripts": {
+    "start": "node dist/index.js",
+    "migrate": "node dist/migrate.js",
     "lint": "biome check --write",
     "lint:unsafe": "biome check --write --unsafe",
     "biome:ci": "biome ci",
@@ -25,6 +27,7 @@
     "@prisma/client": "^7.10.0",
     "@projectdysnomia/dysnomia": "0.2.4",
     "async-wait-until": "^2.0.31",
+    "better-sqlite3": "^12.11.1",
     "fix-esm": "^1.0.1",
     "mpg123-decoder": "^1.0.3",
     "node-schedule": "^2.1.1",
@@ -36,6 +39,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.19.2",
     "@types/node-schedule": "^2.1.8",
     "@types/sprintf-js": "^1.1.4",
