@@ -22,7 +22,7 @@ export const DEFAULT_MONGODB_DUMP = './mongo_dump.json'
 const MIGRATIONS_DIR = 'prisma/migrations'
 // Rewrites existing rows (ttsType -> ttsProvider); unmapped values are logged before it runs
 const TTS_PROVIDER_MIGRATION = '20261030120000_tts_provider'
-const MIGRATE_HINT = '請先執行 `pnpm migrate`'
+const MIGRATE_HINT = 'Run `pnpm migrate` first'
 
 const logger = instances.mainLogger.getSubLogger({ name: 'DataMigration' })
 

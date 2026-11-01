@@ -10,7 +10,7 @@ The upgrade steps are in the [README](../README.md#upgrading). This page explain
 
 The bot never migrates on its own. It exits with code 78 when it needs you before it can run:
 
-- The database has unapplied migrations, the data version is older than the code's, or a MongoDB dump at `./mongo_dump.json` is waiting to be imported. It logs ``請先執行 `pnpm migrate` ``.
+- The database has unapplied migrations, the data version is older than the code's, or a MongoDB dump at `./mongo_dump.json` is waiting to be imported. It logs ``Run `pnpm migrate` first``.
 - The data version record is malformed or newer than the code. It logs an error.
 - `prisma/migrations` is missing, for example because the bot was started from another directory. It logs the missing path.
 - `config.json` does not exist. The bot generates an empty one; fill it in and start the bot again.
