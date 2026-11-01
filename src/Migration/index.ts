@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync as exists, readdirSync as readDir, readFileSync as readFile } from 'node:fs'
 import { resolve } from 'node:path'
+import { Prisma } from '@prisma/client'
 import { EXIT_NO_RESTART } from '../Utils/ExitCode'
 import { instances } from '../Utils/Instances'
 import { writeAtomic } from '../Utils/WriteAtomic'
@@ -172,10 +173,13 @@ async function backupData({ yolo, dumpPath, backupDir, run }: { yolo: boolean; d
 async function logUnmappedTTSTypes() {
   if (!exists(databasePath()) || !(await pendingMigrations()).includes(TTS_PROVIDER_MIGRATION)) return
   const { prisma } = await import('../Core/SQLite/Client')
-  const table = await prisma.$queryRawUnsafe<unknown[]>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'serverConfig'")
+  // Raw SQL: this runs before tts_provider, while serverConfig still has the old ttsType column, but the
+  // generated client follows the new schema; sqlite_master is not a Prisma model
+  const table = await prisma.$queryRaw<unknown[]>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'serverConfig'`
   if (table.length === 0) return
   const { DEFAULT_TTS_PROVIDER } = await import('../Core/SQLite/db/ServerConfig')
-  const rows = await prisma.$queryRawUnsafe<{ serverID: string; ttsType: string }[]>("SELECT serverID, ttsType FROM serverConfig WHERE ttsType NOT IN ('WaveNet', 'Legacy')")
+  const mapped = Prisma.join(['WaveNet', 'Legacy'])
+  const rows = await prisma.$queryRaw<{ serverID: string; ttsType: string }[]>`SELECT serverID, ttsType FROM serverConfig WHERE ttsType NOT IN (${mapped})`
   for (const row of rows) {
     logger.warn(`Guild ${row.serverID} has unknown TTS type "${row.ttsType}"; migrating to the default provider ${DEFAULT_TTS_PROVIDER}`)
   }
@@ -369,9 +373,10 @@ async function pendingMigrations() {
   if (!exists(databasePath())) return all
   // Loaded here: importing the client creates the database directory, which --preflight must not do
   const { prisma } = await import('../Core/SQLite/Client')
-  const history = await prisma.$queryRawUnsafe<unknown[]>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_prisma_migrations'")
+  // Raw SQL: sqlite_master and _prisma_migrations are not Prisma models
+  const history = await prisma.$queryRaw<unknown[]>`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '_prisma_migrations'`
   if (history.length === 0) return all
-  const applied = await prisma.$queryRawUnsafe<{ name: string }[]>('SELECT migration_name AS name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL')
+  const applied = await prisma.$queryRaw<{ name: string }[]>`SELECT migration_name AS name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL`
   const appliedNames = new Set(applied.map((row) => row.name))
   return all.filter((name) => !appliedNames.has(name))
 }
