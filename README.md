@@ -80,7 +80,28 @@ The API key is used whenever it is set. The login is saved as a plain text file 
 
 If a refresh fails, or the token file is not a valid login, the bot logs an error asking you to run `pnpm xai:login` again and skips that text; it keeps running. With the login, a 401 means the token was revoked: run `pnpm xai:login` again, and a 403 means the login can't use the API: set `xaiTTS.apiKey` instead. A 429, a 5xx or a network error is retried up to twice, within the 30 second limit for that text.
 
-`voice` is an [xAI voice](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#voices) (built-in such as `eve`, or a custom voice ID); no voice, or one xAI does not have, uses `xaiTTS.voice`, or `eve` when that is empty. `xaiTTS.language` overrides the language sent to xAI; otherwise `lang` is sent when xAI lists it (e.g. `pt-BR`), else its primary subtag (e.g. `zh-TW` as `zh`), else `auto`.
+`lang` is an [xAI language code](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#supported-languages) or `auto`, and `voice` is an [xAI voice](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#voices) (built-in such as `eve`, or a custom voice ID). Both are sent as given. An empty `voice` lets xAI pick its default. In the config, `xaiTTS` is only the API key and the token file:
+
+```json
+{
+  "apiKey": "",
+  "tokenFile": ""
+}
+```
+
+The TTS file is:
+
+```json
+{
+  "provider": "xai",
+  "lang": "<xAI language code, or auto>",
+  "voice": "<xAI voice, such as eve, or a custom voice ID>",
+  "join": "<Text when connected to the channel>",
+  "left": "<Text when left the channel>",
+  "switched_out": "<Text when switched out from the channel>",
+  "switched_in": "<Text when switched into to the channel>"
+}
+```
 
 Files in the old format (`use_wave_tts` instead of `provider`) are converted by `pnpm migrate` when upgrading to [data version](docs/UPGRADING.md#data-version) 2; see the [TTS provider migration guide](docs/migration/TTS_PROVIDER_MIGRATION.md). Files added later must use `provider`; files without a usable `provider` are skipped with an error.
 
@@ -101,6 +122,17 @@ Example:
   "provider": "google-cloud",
   "lang": "en-GB",
   "voice": "en-GB-Wavenet-B",
+  "join": "Jim joined the channel",
+  "left": "Jim left the channel",
+  "switched_out": "Jim switched out from the channel",
+  "switched_in": "Jim switched into  the channel"
+}
+```
+```json
+{
+  "provider": "xai",
+  "lang": "en",
+  "voice": "eve",
   "join": "Jim joined the channel",
   "left": "Jim left the channel",
   "switched_out": "Jim switched out from the channel",

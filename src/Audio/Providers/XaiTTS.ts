@@ -5,9 +5,6 @@ import { xaiAccessToken, xaiTokenFile } from '../../Utils/XaiOAuth'
 import { fetchWithRetry } from '../FetchWithRetry'
 import type { SynthesisSignal, TTSProvider } from '../TTSProvider'
 
-// https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#supported-languages
-const LANGUAGES = new Set(['en', 'ar-eg', 'ar-sa', 'ar-ae', 'bn', 'zh', 'fr', 'de', 'hi', 'id', 'it', 'ja', 'ko', 'pt-br', 'pt-pt', 'ru', 'es-mx', 'es-es', 'tr', 'vi'])
-
 // xAI text to speech as 48kHz pcm. xAI's pcm is mono s16le (there is no channel option), so each
 // sample is played on both channels
 export class XaiTTS implements TTSProvider {
@@ -27,48 +24,25 @@ export class XaiTTS implements TTSProvider {
     return apiKey || exists(xaiTokenFile(tokenFile)) ? undefined : 'xaiTTS.apiKey is not set in config.json and there is no xAI login (run `pnpm xai:login`)'
   }
 
-  public cacheKey(text: string, lang: string, voice: string) {
-    return `${text}-${this.language(lang)}-${voice || this.fallbackVoice()}-pcm48000`
-  }
-
-  // zh-TW -> zh, en_US -> en, pt-BR -> pt-br: the full tag when xAI lists it, else its primary subtag
-  private language(lang: string) {
-    const tag = lang.toLowerCase().replaceAll('_', '-')
-    return this.config().language || ([tag, tag.split('-')[0]].find((code) => LANGUAGES.has(code)) ?? 'auto')
-  }
-
-  private fallbackVoice() {
-    return this.config().voice || 'eve'
-  }
-
   public async synthesize(text: string, lang: string, voice: string, signal: SynthesisSignal): Promise<Uint8Array | null> {
     const { apiKey, tokenFile } = this.config()
-    const fallback = this.fallbackVoice()
     let token = apiKey
-    const post = (voiceId: string) =>
-      fetchWithRetry('https://api.x.ai/v1/tts', {
+    try {
+      token ||= await xaiAccessToken(xaiTokenFile(tokenFile))
+      const res = await fetchWithRetry('https://api.x.ai/v1/tts', {
         method: 'POST',
         // biome-ignore lint/style/useNamingConvention: HTTP header
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text,
+          language: lang,
           // biome-ignore lint/style/useNamingConvention: xAI API field
-          voice_id: voiceId,
-          language: this.language(lang),
+          ...(voice ? { voice_id: voice } : {}),
           // biome-ignore lint/style/useNamingConvention: xAI API field
           output_format: { codec: 'pcm', sample_rate: 48000 }
         }),
         signal
       })
-    try {
-      token ||= await xaiAccessToken(xaiTokenFile(tokenFile))
-      const voiceId = voice || fallback
-      let res = await post(voiceId)
-      // An unknown voice (e.g. a Google voice name kept from google-cloud) gets one try with the fallback
-      if (res.status === 404 && voiceId !== fallback) {
-        this.logger.warn(`xAI TTS has no voice ${voiceId}; trying ${fallback}`)
-        res = await post(fallback)
-      }
       if (!res.ok) {
         const detail = (await res.text()).replaceAll(token, '<redacted>').replace(/\s+/g, ' ').trim().slice(0, 300)
         const hint = res.status === 403 && !apiKey ? '; the xAI login may not be allowed to use the API, set xaiTTS.apiKey instead' : ''
