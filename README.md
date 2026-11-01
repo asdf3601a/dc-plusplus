@@ -88,7 +88,9 @@ If you want to use xAI text to speech, set `xaiTTS.apiKey` in the config, or run
 ```
 `lang` is an [xAI language code](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#supported-languages) or `auto`, and `voice` is an [xAI voice](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#voices) such as `eve` or a custom voice ID. Both are sent as given; an empty `voice` uses xAI's default. When a server's `/voice tts` switches to xai, set `voice_lang` and `voice_name` to xAI values too.
 
-The API key wins when set. The login is saved to `xai-oauth.json` in the project root (mode 0600) and refreshed by the bot; keep it private and delete it to sign out. If the login stops working, the bot logs an error and skips that text: run `pnpm xai:login` again, or set `xaiTTS.apiKey` if xAI answers 403.
+If the login stops working, the bot logs an error and skips that text: run `pnpm xai:login` again, or set `xaiTTS.apiKey` if xAI answers 403.
+
+**xAI login file.** `pnpm xai:login` saves the login to `./xai-oauth.json` in the directory it runs from. The bot reads that same relative path from its own working directory, so run the login and start the bot in the same directory (the project root, next to `config.json`); the name and place are fixed. The file holds the access and refresh tokens and is written with mode 0600. A refresh rewrites it, so it must stay writable: the bot holds `xai-oauth.json.lock` and writes a temporary `xai-oauth.json.<pid>.<n>.tmp` beside it, then renames that file into place. `.gitignore` (`xai-oauth.json*`) covers the login file, the lock and the temporary file. A refresh stores the new refresh token from the response, or keeps the previous one when the response has none; the code treats that token as single-use, so do not copy the file to another machine (run `pnpm xai:login` there). Delete the file to sign out. When `xaiTTS.apiKey` is set, the file is not read.
 
 The first start after upgrading to config version 4 saves the old file as `config-3.json` and exits; check `config.json` and start again.
 
