@@ -22,8 +22,6 @@ export const BACKUP_DIR = 'backup'
 export const MANIFEST_FILE = 'manifest.json'
 const MANIFEST_FORMAT = 1
 const EXTERNAL_DIR = 'external'
-// backup/<timestamp>-<n> when the timestamp is taken
-const MAX_SUFFIX = 99
 
 // kind "database": an SQLite file, checked with PRAGMA integrity_check; "file": any other file;
 // "absent": nothing was at original, so a restore deletes what is there now
@@ -58,21 +56,18 @@ function isInside(path: string, dir: string) {
   return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel))
 }
 
-// A new, empty <baseDir>/<timestamp>[-n]; never reuses an existing directory
+// A new, empty <baseDir>/<timestamp>; never reuses an existing directory
 function createBackupDir(baseDir: string) {
   mkDir(baseDir, { recursive: true })
-  const name = backupTimestamp()
-  for (let n = 0; n <= MAX_SUFFIX; n++) {
-    const dir = join(baseDir, n === 0 ? name : `${name}-${n}`)
-    try {
-      // Not recursive: fails if the directory exists
-      mkDir(dir)
-      return dir
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-    }
+  const dir = join(baseDir, backupTimestamp())
+  try {
+    // Not recursive: fails if the directory exists
+    mkDir(dir)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`the backup directory ${dir} already exists; run it again to back up to a new one`)
+    throw error
   }
-  throw new Error(`${join(baseDir, name)} and its -1 to -${MAX_SUFFIX} all exist`)
+  return dir
 }
 
 // How the manifest names a path: relative to the working directory (with /) when inside it, else absolute
@@ -115,7 +110,7 @@ function appVersion() {
   }
 }
 
-// Backs up into a new <baseDir>/<YYYYMMDD-HHmmss-SSS>[-n]/ and returns that directory: the database
+// Backs up into a new <baseDir>/<YYYYMMDD-HHmmss-SSS>/ and returns that directory: the database
 // (with rawDatabase a plain copy of the file and its -wal, else VACUUM INTO, a consistent copy even
 // while the bot is running), every file in dirs and the files; a path that does not exist is recorded
 // as absent. Then
