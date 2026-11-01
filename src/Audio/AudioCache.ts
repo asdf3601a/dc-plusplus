@@ -152,6 +152,11 @@ export class AudioCache {
   private async create(provider: TTSProvider, path: string, text: string, lang: string, voice: string): Promise<string | null> {
     const data = await provider.synthesize(text, lang, voice)
     if (data === null) return null
+    // An empty file would be a cache hit that plays nothing until it is evicted
+    if (data.length === 0) {
+      this.logger?.error(`${provider.id} returned no audio for "${text}"; not caching it`)
+      return null
+    }
     // A crash mid-write leaves only a *.tmp file, which never matches a cache key
     try {
       await writeAtomic(path, data)
