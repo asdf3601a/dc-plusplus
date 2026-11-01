@@ -7,7 +7,7 @@ import { writeAtomic } from '../Utils/WriteAtomic'
 import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles } from './assets/steps'
 import { BACKUP_DIR, backup, RestoreError, restore } from './backup'
 import { importMongoDump, preflightMongoDump } from './import-mongo'
-import { databasePath, readRecord, recordFilePath, writeRecord } from './record'
+import { databasePath, readRecord, recordFilePath, type VersionRecord, writeRecord } from './record'
 import { databaseLock, migrationNames, unmappedTTSTypes } from './sqlite'
 
 // Version of the app-side data format (assets/<id>.json). The database is versioned by Prisma's
@@ -139,14 +139,19 @@ async function databaseUnlocked(outcome: string) {
 // dumpPath to import. Empty when there is nothing to migrate, the only case in which `pnpm migrate` makes
 // no backup.
 async function backupReasons(dumpPath?: string) {
+  // preflightData already rejected a malformed or newer record
+  return outdatedReasons(readRecord(recordFilePath()), 'no data version recorded', dumpPath === undefined ? undefined : `MongoDB dump ${dumpPath}`)
+}
+
+// Why the data is not up to date: unapplied Prisma migrations, a data version record that is missing
+// (noRecord) or older than DATA_VERSION, and dump, a MongoDB dump still to import. Empty when it is.
+async function outdatedReasons(record: VersionRecord, noRecord: string, dump: string | undefined) {
   const reasons: string[] = []
   const pending = await pendingMigrations()
   if (pending.length > 0) reasons.push(`unapplied database migrations: ${pending.join(', ')}`)
-  // preflightData already rejected a malformed or newer record
-  const record = readRecord(recordFilePath())
-  if (record.kind !== 'ok') reasons.push('no data version recorded')
+  if (record.kind !== 'ok') reasons.push(noRecord)
   else if (record.version < DATA_VERSION) reasons.push(`data version ${record.version} is older than ${DATA_VERSION}`)
-  if (dumpPath !== undefined) reasons.push(`MongoDB dump ${dumpPath}`)
+  if (dump !== undefined) reasons.push(dump)
   return reasons
 }
 
@@ -277,12 +282,8 @@ export async function checkData(): Promise<boolean> {
   const record = readUsableRecord(path, 'refusing to start')
   if (!record) return false
 
-  const problems: string[] = []
-  const pending = await pendingMigrations()
-  if (pending.length > 0) problems.push(`unapplied database migrations: ${pending.join(', ')}`)
-  if (record.kind === 'none') problems.push(`no data version recorded in ${path}`)
-  else if (record.version < DATA_VERSION) problems.push(`data version ${record.version} is older than ${DATA_VERSION}`)
-  if (exists(DEFAULT_MONGODB_DUMP)) problems.push(`MongoDB dump ${DEFAULT_MONGODB_DUMP} not imported yet`)
+  const dump = exists(DEFAULT_MONGODB_DUMP) ? `MongoDB dump ${DEFAULT_MONGODB_DUMP} not imported yet` : undefined
+  const problems = await outdatedReasons(record, `no data version recorded in ${path}`, dump)
   if (problems.length === 0) return true
 
   logger.error(`Data is not up to date (${problems.join('; ')}). ${MIGRATE_HINT}`)

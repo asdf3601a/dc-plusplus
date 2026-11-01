@@ -6,7 +6,7 @@ import { writeAtomic } from '../Utils/WriteAtomic'
 // data-version.json: the data version the app-side data was last migrated to
 const RECORD_FILE = 'data-version.json'
 
-type VersionRecord = { kind: 'none' } | { kind: 'ok'; version: number } | { kind: 'invalid'; reason: string }
+export type VersionRecord = { kind: 'none' } | { kind: 'ok'; version: number } | { kind: 'invalid'; reason: string }
 
 // The record lives next to the SQLite database file
 export function recordFilePath() {
