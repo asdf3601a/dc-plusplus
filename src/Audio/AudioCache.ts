@@ -157,8 +157,7 @@ export class AudioCache {
     const timeout = this.synthesisTimeoutMs
     const signal = AbortSignal.timeout(timeout)
     const synthesis = provider.synthesize(text, lang, voice, signal)
-    // Google Translate's mp3 decode, xAI's token refresh (own 20 s timeout) and waiting on the token lock
-    // (up to 60 s) don't follow the signal, so the race enforces the limit
+    // Not every step of synthesize() honors the signal, so the race enforces the limit
     const timedOut = new Promise<undefined>((resolve) => signal.addEventListener('abort', () => resolve(undefined)))
     const data = await Promise.race([synthesis, timedOut])
     if (data === undefined) {
