@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises'
 import type { ILogObj, Logger } from 'tslog'
 import type { XaiTTSConfig } from '../../Utils/Config'
 import type { TTSProvider } from '../TTSProvider'
@@ -55,11 +56,23 @@ export class XaiTTS implements TTSProvider {
         })
       })
     try {
-      let res = await post(voice || fallback)
-      // An unknown voice (e.g. a Google voice name kept from google-cloud) gets one try with the fallback
-      if (res.status === 404 && voice && voice !== fallback) {
-        this.logger.warn(`xAI TTS has no voice ${voice}; trying ${fallback}`)
-        res = await post(fallback)
+      let voiceId = voice || fallback
+      let res = await post(voiceId)
+      for (let retries = 0; ; ) {
+        // An unknown voice (e.g. a Google voice name kept from google-cloud) gets one try with the fallback
+        if (res.status === 404 && voiceId !== fallback) {
+          this.logger.warn(`xAI TTS has no voice ${voiceId}; trying ${fallback}`)
+          voiceId = fallback
+        } else if ((res.status === 429 || res.status >= 500) && retries < 2) {
+          const header = res.headers.get('retry-after') ?? ''
+          const after = /^\d+$/.test(header) ? Number(header) * 1000 : Date.parse(header) - Date.now()
+          // Retry-After is capped at 30 s so an announcement is dropped rather than held for minutes
+          await sleep(Number.isNaN(after) ? (500 << retries) * (0.75 + Math.random() / 2) : Math.min(Math.max(after, 0), 30_000))
+          retries++
+        } else {
+          break
+        }
+        res = await post(voiceId)
       }
       if (!res.ok) {
         const detail = (await res.text()).replaceAll(apiKey, '<redacted>').replace(/\s+/g, ' ').trim().slice(0, 300)
