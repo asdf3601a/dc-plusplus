@@ -90,7 +90,7 @@ If you want to use xAI text to speech, set `xaiTTS.apiKey` in the config, or run
 
 If the login stops working, the bot logs an error and skips that text: run `pnpm xai:login` again, or set `xaiTTS.apiKey` if xAI answers 403.
 
-**xAI login file.** `pnpm xai:login` saves the login to `./xai-oauth.json` in the directory it runs from. The bot reads that same relative path from its own working directory, so run the login and start the bot in the same directory (the project root, next to `config.json`); the name and place are fixed. The file holds the access and refresh tokens and is written with mode 0600. A refresh writes the new tokens into `xai-oauth.json.lock` and renames it over the file, so the directory must stay writable. `.gitignore` (`xai-oauth.json*`) covers the login file and the lock. A refresh stores the new refresh token from the response, or keeps the previous one when the response has none; the code treats that token as single-use, so do not copy the file to another machine (run `pnpm xai:login` there). Delete the file to sign out. When `xaiTTS.apiKey` is set, the file is not read.
+The login is saved to `xai-oauth.json` next to `config.json`; delete it to sign out.
 
 The first start after upgrading to config version 4 saves the old file as `config-3.json` and exits; check `config.json` and start again.
 
@@ -130,3 +130,5 @@ Example:
   "switched_in": "Jim switched into  the channel"
 }
 ```
+
+To add another TTS provider, see [docs/TTS_PROVIDERS.md](docs/TTS_PROVIDERS.md).
