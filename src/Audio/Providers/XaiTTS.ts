@@ -1,6 +1,8 @@
+import { existsSync as exists } from 'node:fs'
 import { setTimeout as sleep } from 'node:timers/promises'
 import type { ILogObj, Logger } from 'tslog'
 import type { XaiTTSConfig } from '../../Utils/Config'
+import { xaiAccessToken, xaiTokenFile } from '../../Utils/XaiOAuth'
 import type { TTSProvider } from '../TTSProvider'
 
 // https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#supported-languages
@@ -21,7 +23,8 @@ export class XaiTTS implements TTSProvider {
   }
 
   public unavailableReason() {
-    return this.config().apiKey ? undefined : 'xaiTTS.apiKey is not set in config.json'
+    const { apiKey, tokenFile } = this.config()
+    return apiKey || exists(xaiTokenFile(tokenFile)) ? undefined : 'xaiTTS.apiKey is not set in config.json and there is no xAI login (run `pnpm xai:login`)'
   }
 
   public cacheKey(text: string, lang: string, voice: string) {
@@ -39,13 +42,14 @@ export class XaiTTS implements TTSProvider {
   }
 
   public async synthesize(text: string, lang: string, voice = ''): Promise<Uint8Array | null> {
-    const { apiKey } = this.config()
+    const { apiKey, tokenFile } = this.config()
     const fallback = this.fallbackVoice()
+    let token = apiKey
     const post = (voiceId: string) =>
       fetch('https://api.x.ai/v1/tts', {
         method: 'POST',
         // biome-ignore lint/style/useNamingConvention: HTTP header
-        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text,
           // biome-ignore lint/style/useNamingConvention: xAI API field
@@ -56,6 +60,7 @@ export class XaiTTS implements TTSProvider {
         })
       })
     try {
+      token ||= await xaiAccessToken(xaiTokenFile(tokenFile))
       let voiceId = voice || fallback
       let res = await post(voiceId)
       for (let retries = 0; ; ) {
@@ -75,8 +80,9 @@ export class XaiTTS implements TTSProvider {
         res = await post(voiceId)
       }
       if (!res.ok) {
-        const detail = (await res.text()).replaceAll(apiKey, '<redacted>').replace(/\s+/g, ' ').trim().slice(0, 300)
-        this.logger.error(`xAI TTS API responded ${res.status}: ${detail || 'no error details'}`)
+        const detail = (await res.text()).replaceAll(token, '<redacted>').replace(/\s+/g, ' ').trim().slice(0, 300)
+        const hint = res.status === 403 && !apiKey ? '; the xAI login may not be allowed to use the API, set xaiTTS.apiKey instead' : ''
+        this.logger.error(`xAI TTS API responded ${res.status}: ${detail || 'no error details'}${hint}`)
         return null
       }
       const type = res.headers.get('content-type') ?? ''
