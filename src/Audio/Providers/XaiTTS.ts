@@ -24,34 +24,43 @@ export class XaiTTS implements TTSProvider {
   }
 
   public cacheKey(text: string, lang: string, voice: string) {
-    return `${text}-${this.language(lang)}-${this.voice(voice)}-pcm48000`
+    return `${text}-${this.language(lang)}-${voice || this.fallbackVoice()}-pcm48000`
   }
 
+  // zh-TW -> zh, en_US -> en, pt-BR -> pt-br: the full tag when xAI lists it, else its primary subtag
   private language(lang: string) {
-    const primary = lang.split(/[-_]/)[0].toLowerCase()
-    return this.config().language || (LANGUAGES.has(primary) ? primary : 'auto')
+    const tag = lang.toLowerCase().replaceAll('_', '-')
+    return this.config().language || ([tag, tag.split('-')[0]].find((code) => LANGUAGES.has(code)) ?? 'auto')
   }
 
-  private voice(voice: string) {
-    return voice || this.config().voice || 'eve'
+  private fallbackVoice() {
+    return this.config().voice || 'eve'
   }
 
   public async synthesize(text: string, lang: string, voice = ''): Promise<Uint8Array | null> {
     const { apiKey } = this.config()
-    try {
-      const res = await fetch('https://api.x.ai/v1/tts', {
+    const fallback = this.fallbackVoice()
+    const post = (voiceId: string) =>
+      fetch('https://api.x.ai/v1/tts', {
         method: 'POST',
         // biome-ignore lint/style/useNamingConvention: HTTP header
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text,
           // biome-ignore lint/style/useNamingConvention: xAI API field
-          voice_id: this.voice(voice),
+          voice_id: voiceId,
           language: this.language(lang),
           // biome-ignore lint/style/useNamingConvention: xAI API field
           output_format: { codec: 'pcm', sample_rate: 48000 }
         })
       })
+    try {
+      let res = await post(voice || fallback)
+      // An unknown voice (e.g. a Google voice name kept from google-cloud) gets one try with the fallback
+      if (res.status === 404 && voice && voice !== fallback) {
+        this.logger.warn(`xAI TTS has no voice ${voice}; trying ${fallback}`)
+        res = await post(fallback)
+      }
       if (!res.ok) {
         const detail = (await res.text()).replaceAll(apiKey, '<redacted>').replace(/\s+/g, ' ').trim().slice(0, 300)
         this.logger.error(`xAI TTS API responded ${res.status}: ${detail || 'no error details'}`)
