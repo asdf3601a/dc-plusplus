@@ -1,9 +1,9 @@
 import { existsSync as exists } from 'node:fs'
-import { setTimeout as sleep } from 'node:timers/promises'
 import type { ILogObj, Logger } from 'tslog'
 import type { XaiTTSConfig } from '../../Utils/Config'
 import { xaiAccessToken, xaiTokenFile } from '../../Utils/XaiOAuth'
-import type { TTSProvider } from '../TTSProvider'
+import type { SynthesisSignal, TTSProvider } from '../TTSProvider'
+import { fetchWithRetry } from './FetchWithRetry'
 
 // https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#supported-languages
 const LANGUAGES = new Set(['en', 'ar-eg', 'ar-sa', 'ar-ae', 'bn', 'zh', 'fr', 'de', 'hi', 'id', 'it', 'ja', 'ko', 'pt-br', 'pt-pt', 'ru', 'es-mx', 'es-es', 'tr', 'vi'])
@@ -41,12 +41,12 @@ export class XaiTTS implements TTSProvider {
     return this.config().voice || 'eve'
   }
 
-  public async synthesize(text: string, lang: string, voice = ''): Promise<Uint8Array | null> {
+  public async synthesize(text: string, lang: string, voice: string, signal: SynthesisSignal): Promise<Uint8Array | null> {
     const { apiKey, tokenFile } = this.config()
     const fallback = this.fallbackVoice()
     let token = apiKey
     const post = (voiceId: string) =>
-      fetch('https://api.x.ai/v1/tts', {
+      fetchWithRetry('https://api.x.ai/v1/tts', {
         method: 'POST',
         // biome-ignore lint/style/useNamingConvention: HTTP header
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -57,27 +57,17 @@ export class XaiTTS implements TTSProvider {
           language: this.language(lang),
           // biome-ignore lint/style/useNamingConvention: xAI API field
           output_format: { codec: 'pcm', sample_rate: 48000 }
-        })
+        }),
+        signal
       })
     try {
       token ||= await xaiAccessToken(xaiTokenFile(tokenFile))
-      let voiceId = voice || fallback
+      const voiceId = voice || fallback
       let res = await post(voiceId)
-      for (let retries = 0; ; ) {
-        // An unknown voice (e.g. a Google voice name kept from google-cloud) gets one try with the fallback
-        if (res.status === 404 && voiceId !== fallback) {
-          this.logger.warn(`xAI TTS has no voice ${voiceId}; trying ${fallback}`)
-          voiceId = fallback
-        } else if ((res.status === 429 || res.status >= 500) && retries < 2) {
-          const header = res.headers.get('retry-after') ?? ''
-          const after = /^\d+$/.test(header) ? Number(header) * 1000 : Date.parse(header) - Date.now()
-          // Retry-After is capped at 30 s so an announcement is dropped rather than held for minutes
-          await sleep(Number.isNaN(after) ? (500 << retries) * (0.75 + Math.random() / 2) : Math.min(Math.max(after, 0), 30_000))
-          retries++
-        } else {
-          break
-        }
-        res = await post(voiceId)
+      // An unknown voice (e.g. a Google voice name kept from google-cloud) gets one try with the fallback
+      if (res.status === 404 && voiceId !== fallback) {
+        this.logger.warn(`xAI TTS has no voice ${voiceId}; trying ${fallback}`)
+        res = await post(fallback)
       }
       if (!res.ok) {
         const detail = (await res.text()).replaceAll(token, '<redacted>').replace(/\s+/g, ' ').trim().slice(0, 300)
@@ -89,7 +79,7 @@ export class XaiTTS implements TTSProvider {
       const body = await res.arrayBuffer()
       // A 200 can still be an error body; xAI's actual content-type for pcm is unconfirmed, so only an
       // error-shaped type (json/text/html/xml) is rejected, not an audio type we did not anticipate
-      if (/json|text|html|xml/i.test(type) || body.byteLength === 0 || body.byteLength % 2 !== 0) {
+      if (/json|text|html|xml/i.test(type) || body.byteLength % 2 !== 0) {
         this.logger.error(`xAI TTS returned no usable pcm (${type || 'no content type'}, ${body.byteLength} bytes)`)
         return null
       }

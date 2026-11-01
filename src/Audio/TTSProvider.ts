@@ -12,5 +12,8 @@ export interface TTSProvider {
   unavailableReason(): string | undefined
   // Cache key after the id, when it is not text-lang-voice as given (e.g. the voice and language actually sent)
   cacheKey?(text: string, lang: string, voice: string): string
-  synthesize(text: string, lang: string, voice?: string): Promise<Uint8Array | null>
+  // signal aborts at the synthesis time limit, which is deadline (ms since the epoch); pass it to every fetch
+  synthesize(text: string, lang: string, voice: string, signal: SynthesisSignal): Promise<Uint8Array | null>
 }
+
+export type SynthesisSignal = AbortSignal & { readonly deadline: number }

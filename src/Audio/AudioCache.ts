@@ -4,7 +4,7 @@ import { readdir, stat, unlink, utimes } from 'node:fs/promises'
 import type { ILogObj, Logger } from 'tslog'
 import { TEMP_SUFFIX, writeAtomic } from '../Utils/WriteAtomic'
 import type { AudioFormat } from './AudioAsset'
-import type { TTSProvider } from './TTSProvider'
+import type { SynthesisSignal, TTSProvider } from './TTSProvider'
 
 const EXTENSIONS: Record<AudioFormat, string> = { ogg: 'opus', pcm: 'pcm' }
 // Files used this recently are never evicted, whatever the size and age limits, so a file that is
@@ -19,6 +19,8 @@ export interface AudioCacheOptions {
   maxAgeMs?: number
   // Eviction runs this long after a new file is written (one run per window)
   evictDelayMs?: number
+  // A synthesis that has not finished after this long resolves to null (default 30 s)
+  synthesisTimeoutMs?: number
   logger?: Logger<ILogObj>
 }
 
@@ -34,6 +36,7 @@ export class AudioCache {
   private readonly maxBytes: number
   private readonly maxAgeMs: number
   private readonly evictDelayMs: number
+  private readonly synthesisTimeoutMs: number
   private readonly logger: Logger<ILogObj> | undefined
   private readonly inFlight = new Map<string, Promise<string | null>>()
   private evicting: Promise<EvictionResult> | undefined
@@ -44,6 +47,7 @@ export class AudioCache {
     this.maxBytes = options.maxBytes ?? 500 * 1024 * 1024
     this.maxAgeMs = options.maxAgeMs ?? 30 * 24 * 60 * 60 * 1000
     this.evictDelayMs = options.evictDelayMs ?? 60 * 1000
+    this.synthesisTimeoutMs = options.synthesisTimeoutMs ?? 30 * 1000
     this.logger = options.logger?.getSubLogger({ name: 'AudioCache' })
   }
 
@@ -151,7 +155,23 @@ export class AudioCache {
   }
 
   private async create(provider: TTSProvider, path: string, text: string, lang: string, voice: string): Promise<string | null> {
-    const data = await provider.synthesize(text, lang, voice)
+    const timeout = this.synthesisTimeoutMs
+    const signal: SynthesisSignal = Object.assign(AbortSignal.timeout(timeout), { deadline: Date.now() + timeout })
+    const synthesis = provider.synthesize(text, lang, voice, signal)
+    // Raced, not just signalled, so a provider that ignores the signal cannot hold the in-flight entry
+    const timedOut = new Promise<undefined>((resolve) => signal.addEventListener('abort', () => resolve(undefined)))
+    const data = await Promise.race([synthesis, timedOut])
+    if (data === undefined) {
+      this.logger?.error(`${provider.id} did not finish "${text}" within ${timeout / 1000} s`)
+      synthesis
+        .then((late) => {
+          if (late) this.logger?.warn(`${provider.id} finished "${text}" after the time limit; discarded`)
+        })
+        .catch(() => {
+          // A rejection after the timeout is already logged above; nothing is waiting on this promise
+        })
+      return null
+    }
     if (data === null) return null
     // An empty file would be a cache hit that plays nothing until it is evicted
     if (data.length === 0) {
