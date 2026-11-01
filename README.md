@@ -74,6 +74,10 @@ If you want to use the new google cloud text to speech, be sure to have apiKey i
 ```
 `lang` and `voice` available from https://cloud.google.com/text-to-speech/docs/voices
 
+For xAI text to speech, use `"provider": "xai"` with the same fields, and either set `xaiTTS.apiKey` in the config or sign in once with `pnpm xai:login` (after building; it prints a link and a code to approve in the browser). The API key is used whenever it is set. The login is saved to `xaiTTS.tokenFile`, by default `discord-voice-log/xai-oauth.json` in your user config folder (`~/.config` or `%APPDATA%`), and refreshed by the bot; if it stops working, run `pnpm xai:login` again.
+
+`voice` is an [xAI voice](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#voices) (built-in such as `eve`, or a custom voice ID); no voice, or one xAI does not have, uses `xaiTTS.voice`, or `eve` when that is empty. `xaiTTS.language` overrides the language sent to xAI; otherwise `lang` is sent when xAI lists it (e.g. `pt-BR`), else its primary subtag (e.g. `zh-TW` as `zh`), else `auto`.
+
 Files in the old format (`use_wave_tts` instead of `provider`) are converted by `pnpm migrate` when upgrading to [data version](docs/UPGRADING.md#data-version) 2; see the [TTS provider migration guide](docs/migration/TTS_PROVIDER_MIGRATION.md). Files added later must use `provider`; files without a usable `provider` are skipped with an error.
 
 Example:
