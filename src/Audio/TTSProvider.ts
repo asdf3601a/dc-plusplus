@@ -10,8 +10,6 @@ export interface TTSProvider {
   readonly usesVoice: boolean
   // Why the provider cannot be used right now (e.g. missing API key), or undefined when it can
   unavailableReason(): string | undefined
-  // signal aborts at the synthesis time limit, which is deadline (ms since the epoch); pass it to every fetch
-  synthesize(text: string, lang: string, voice: string, signal: SynthesisSignal): Promise<Uint8Array | null>
+  // signal aborts at the synthesis time limit; pass it to every fetch
+  synthesize(text: string, lang: string, voice: string, signal: AbortSignal): Promise<Uint8Array | null>
 }
-
-export type SynthesisSignal = AbortSignal & { readonly deadline: number }

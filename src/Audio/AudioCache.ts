@@ -4,7 +4,7 @@ import { readdir, stat, unlink, utimes } from 'node:fs/promises'
 import type { ILogObj, Logger } from 'tslog'
 import { TEMP_SUFFIX, writeAtomic } from '../Utils/WriteAtomic'
 import type { AudioFormat } from './AudioAsset'
-import type { SynthesisSignal, TTSProvider } from './TTSProvider'
+import type { TTSProvider } from './TTSProvider'
 
 const EXTENSIONS: Record<AudioFormat, string> = { ogg: 'opus', pcm: 'pcm' }
 // Files used this recently are never evicted, whatever the size and age limits, so a file that is
@@ -155,9 +155,10 @@ export class AudioCache {
 
   private async create(provider: TTSProvider, path: string, text: string, lang: string, voice: string): Promise<string | null> {
     const timeout = this.synthesisTimeoutMs
-    const signal: SynthesisSignal = Object.assign(AbortSignal.timeout(timeout), { deadline: Date.now() + timeout })
+    const signal = AbortSignal.timeout(timeout)
     const synthesis = provider.synthesize(text, lang, voice, signal)
-    // Raced, not just signalled, so a provider that ignores the signal cannot hold the in-flight entry
+    // Google Translate's mp3 decode, xAI's token refresh (own 20 s timeout) and waiting on the token lock
+    // (up to 60 s) don't follow the signal, so the race enforces the limit
     const timedOut = new Promise<undefined>((resolve) => signal.addEventListener('abort', () => resolve(undefined)))
     const data = await Promise.race([synthesis, timedOut])
     if (data === undefined) {

@@ -1,6 +1,6 @@
 import type { ILogObj, Logger } from 'tslog'
 import { fetchWithRetry } from '../FetchWithRetry'
-import type { SynthesisSignal, TTSProvider } from '../TTSProvider'
+import type { TTSProvider } from '../TTSProvider'
 
 // Google Cloud Text-to-Speech (WaveNet voices), OGG Opus
 export class GoogleCloudTTS implements TTSProvider {
@@ -19,7 +19,7 @@ export class GoogleCloudTTS implements TTSProvider {
     return this.apiKey() ? undefined : 'googleTTS.apiKey is not set in config.json'
   }
 
-  public async synthesize(text: string, lang: string, voice: string, signal: SynthesisSignal): Promise<Uint8Array | null> {
+  public async synthesize(text: string, lang: string, voice: string, signal: AbortSignal): Promise<Uint8Array | null> {
     const url = 'https://content-texttospeech.googleapis.com/v1/text:synthesize?alt=json'
     const options = {
       body: JSON.stringify({

@@ -2,7 +2,7 @@ import { existsSync as exists } from 'node:fs'
 import type { ILogObj, Logger } from 'tslog'
 import { XAI_TOKEN_FILE, xaiAccessToken } from '../../Utils/XaiOAuth'
 import { fetchWithRetry } from '../FetchWithRetry'
-import type { SynthesisSignal, TTSProvider } from '../TTSProvider'
+import type { TTSProvider } from '../TTSProvider'
 
 // xAI text to speech as 48kHz pcm. xAI's pcm is mono s16le (there is no channel option), so each
 // sample is played on both channels
@@ -22,7 +22,7 @@ export class XaiTTS implements TTSProvider {
     return this.apiKey() || exists(XAI_TOKEN_FILE) ? undefined : 'xaiTTS.apiKey is not set in config.json and there is no xAI login (run `pnpm xai:login`)'
   }
 
-  public async synthesize(text: string, lang: string, voice: string, signal: SynthesisSignal): Promise<Uint8Array | null> {
+  public async synthesize(text: string, lang: string, voice: string, signal: AbortSignal): Promise<Uint8Array | null> {
     const apiKey = this.apiKey()
     let token = apiKey
     try {

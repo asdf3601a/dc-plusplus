@@ -1,7 +1,7 @@
 import type { MPEGDecoderWebWorker } from 'mpg123-decoder'
 import type { ILogObj, Logger } from 'tslog'
 import { fetchWithRetry } from '../FetchWithRetry'
-import type { SynthesisSignal, TTSProvider } from '../TTSProvider'
+import type { TTSProvider } from '../TTSProvider'
 
 // Google Translate TTS, decoded to 48kHz stereo s16 PCM
 export class GoogleTranslateTTS implements TTSProvider {
@@ -35,7 +35,7 @@ export class GoogleTranslateTTS implements TTSProvider {
     return run
   }
 
-  public async synthesize(text: string, lang: string, _voice: string, signal: SynthesisSignal): Promise<Uint8Array | null> {
+  public async synthesize(text: string, lang: string, _voice: string, signal: AbortSignal): Promise<Uint8Array | null> {
     // URLSearchParams encodes &, # and ? in the text, which encodeURI left as URL syntax
     const ttsURL = `https://translate.google.com.tw/translate_tts?${new URLSearchParams({ ie: 'UTF-8', q: text, tl: lang, client: 'tw-ob' })}`
     try {
