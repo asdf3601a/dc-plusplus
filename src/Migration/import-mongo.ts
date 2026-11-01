@@ -1,4 +1,4 @@
-import { existsSync as exists, readFileSync as readFile } from 'node:fs'
+import { readFileSync as readFile } from 'node:fs'
 import { unlink } from 'node:fs/promises'
 import { instances } from '../Utils/Instances'
 
@@ -80,13 +80,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-// Run by `pnpm migrate` before `prisma migrate deploy` when there is a dump: the dump exists and every
-// document is valid. Only reads.
+// Run by `pnpm migrate` before `prisma migrate deploy` when there is a dump (migrate() only passes one
+// that exists): every document is valid. Only reads.
 export function preflightMongoDump(dumpPath: string): boolean {
-  if (!exists(dumpPath)) {
-    logger.error(`MongoDB dump ${dumpPath} not found; nothing was changed`)
-    return false
-  }
   try {
     readMongoDump(dumpPath)
     return true
