@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises'
-import type { SynthesisSignal } from '../TTSProvider'
+import type { SynthesisSignal } from './TTSProvider'
 
 // fetch that retries a 429, a 5xx or a network error up to twice, after 0.5 s then 1 s or the Retry-After.
 // A wait that would end past the synthesis deadline gives up at once with the last response or error.

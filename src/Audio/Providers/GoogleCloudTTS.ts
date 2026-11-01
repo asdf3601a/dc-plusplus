@@ -1,6 +1,6 @@
 import type { ILogObj, Logger } from 'tslog'
+import { fetchWithRetry } from '../FetchWithRetry'
 import type { SynthesisSignal, TTSProvider } from '../TTSProvider'
-import { fetchWithRetry } from './FetchWithRetry'
 
 // Google Cloud Text-to-Speech (WaveNet voices), OGG Opus
 export class GoogleCloudTTS implements TTSProvider {

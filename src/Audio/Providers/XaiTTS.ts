@@ -2,8 +2,8 @@ import { existsSync as exists } from 'node:fs'
 import type { ILogObj, Logger } from 'tslog'
 import type { XaiTTSConfig } from '../../Utils/Config'
 import { xaiAccessToken, xaiTokenFile } from '../../Utils/XaiOAuth'
+import { fetchWithRetry } from '../FetchWithRetry'
 import type { SynthesisSignal, TTSProvider } from '../TTSProvider'
-import { fetchWithRetry } from './FetchWithRetry'
 
 // https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#supported-languages
 const LANGUAGES = new Set(['en', 'ar-eg', 'ar-sa', 'ar-ae', 'bn', 'zh', 'fr', 'de', 'hi', 'id', 'it', 'ja', 'ko', 'pt-br', 'pt-pt', 'ru', 'es-mx', 'es-es', 'tr', 'vi'])

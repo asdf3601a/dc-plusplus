@@ -1,7 +1,7 @@
 import type { MPEGDecoderWebWorker } from 'mpg123-decoder'
 import type { ILogObj, Logger } from 'tslog'
+import { fetchWithRetry } from '../FetchWithRetry'
 import type { SynthesisSignal, TTSProvider } from '../TTSProvider'
-import { fetchWithRetry } from './FetchWithRetry'
 
 // Google Translate TTS, decoded to 48kHz stereo s16 PCM
 export class GoogleTranslateTTS implements TTSProvider {
