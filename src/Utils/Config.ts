@@ -24,8 +24,6 @@ export interface GoogleTTSConfig {
 
 export interface XaiTTSConfig {
   apiKey: string
-  // OAuth tokens from `pnpm xai:login`; empty for the default, outside the repo
-  tokenFile: string
 }
 
 export interface SQLiteConfig {
@@ -55,7 +53,7 @@ export class Config {
     admins: []
   }
   private readonly googleTTSDefault = { apiKey: '' }
-  private readonly xaiTTSDefault = { apiKey: '', tokenFile: '' }
+  private readonly xaiTTSDefault = { apiKey: '' }
   private readonly sqliteDefault = { databaseUrl: 'file:./prisma/voice-log.db' }
 
   constructor(mainLogger: Logger<ILogObj>) {
@@ -140,8 +138,7 @@ export class Config {
 
   private mergeXaiTTSConfig(config: { xaiTTS: Partial<XaiTTSConfig> }) {
     return {
-      apiKey: config.xaiTTS.apiKey ? config.xaiTTS.apiKey : this.xaiTTSDefault.apiKey,
-      tokenFile: config.xaiTTS.tokenFile ? config.xaiTTS.tokenFile : this.xaiTTSDefault.tokenFile
+      apiKey: config.xaiTTS.apiKey ? config.xaiTTS.apiKey : this.xaiTTSDefault.apiKey
     } as XaiTTSConfig
   }
 

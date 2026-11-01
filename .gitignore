@@ -139,6 +139,8 @@ prisma/data-version.json
 logs/
 caches/
 config*.json
+xai-oauth.json
+xai-oauth.json.lock
 vlogdata.json
 vlogdata.json.bak
 mongo*.json

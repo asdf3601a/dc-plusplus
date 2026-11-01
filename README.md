@@ -74,18 +74,17 @@ If you want to use the new google cloud text to speech, be sure to have apiKey i
 ```
 `lang` and `voice` available from https://cloud.google.com/text-to-speech/docs/voices
 
-For xAI text to speech, use `"provider": "xai"` with the same fields, and either set `xaiTTS.apiKey` in the config or sign in once with `pnpm xai:login`. The login uses the Grok CLI's public OAuth client and prints a link and a code to approve in the browser. Run it from the project root after `pnpm build`, with `config.json` already present (the bot's first run creates it); otherwise it exits with an error.
+For xAI text to speech, use `"provider": "xai"` with the same fields. Set `xaiTTS.apiKey` in the config, or sign in once with `pnpm xai:login`. The login uses the Grok CLI's public OAuth client and prints a link and a code to approve in the browser. Run it from the project root after `pnpm build`.
 
-The API key is used whenever it is set. The login is saved as a plain text file (mode 0600) with the access and refresh tokens, at `xaiTTS.tokenFile`, by default `discord-voice-log/xai-oauth.json` in your user config folder (`~/.config` or `%APPDATA%`), outside this repo. Treat it like a password: do not commit or share it. Delete it to sign out. The bot refreshes the token itself. To share one login between bots on the same machine, point `xaiTTS.tokenFile` at the same file; refreshes coordinate through `<tokenFile>.lock`.
+The API key is used whenever it is set. The login is written to `xai-oauth.json` in the project root (mode 0600), with the access and refresh tokens. Treat `xaiTTS.apiKey` and `xai-oauth.json` like passwords: do not commit or share them. Delete `xai-oauth.json` to sign out. The bot refreshes the token itself; refreshes coordinate through `xai-oauth.json.lock`.
 
-If a refresh fails, or the token file is not a valid login, the bot logs an error asking you to run `pnpm xai:login` again and skips that text; it keeps running. With the login, a 401 means the token was revoked: run `pnpm xai:login` again, and a 403 means the login can't use the API: set `xaiTTS.apiKey` instead. A 429, a 5xx or a network error is retried up to twice, within the 30 second limit for that text.
+If a refresh fails, or `xai-oauth.json` is not a valid login, the bot logs an error asking you to run `pnpm xai:login` again and skips that text; it keeps running. With the login, a 401 means the token was revoked: run `pnpm xai:login` again, and a 403 means the login can't use the API: set `xaiTTS.apiKey` instead. A 429, a 5xx or a network error is retried up to twice, within the 30 second limit for that text.
 
-`lang` is an [xAI language code](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#supported-languages) or `auto`, and `voice` is an [xAI voice](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#voices) (built-in such as `eve`, or a custom voice ID). Both are sent as given. An empty `voice` lets xAI pick its default. In the config, `xaiTTS` is only the API key and the token file:
+`lang` is an [xAI language code](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#supported-languages) or `auto`, and `voice` is an [xAI voice](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#voices) (built-in such as `eve`, or a custom voice ID). Both are sent as given. An empty `voice` lets xAI pick its default. When a server's `/voice tts` switches to xai, also set `voice_lang` and `voice_name` to xAI values. In the config, `xaiTTS` is only the API key:
 
 ```json
 {
-  "apiKey": "",
-  "tokenFile": ""
+  "apiKey": ""
 }
 ```
 

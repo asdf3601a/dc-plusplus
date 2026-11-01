@@ -1,7 +1,5 @@
 import { readFileSync as readFile } from 'node:fs'
-import { mkdir, open, rm, stat } from 'node:fs/promises'
-import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { open, rm, stat } from 'node:fs/promises'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { writeAtomic } from './WriteAtomic'
 
@@ -16,10 +14,8 @@ interface XaiTokens {
   lifetime: number
 }
 
-// Outside the repo by default, so the tokens are never committed or copied with a checkout
-export function xaiTokenFile(configured: string) {
-  return configured || join(process.env.APPDATA || process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'discord-voice-log', 'xai-oauth.json')
-}
+// Fixed path in the project root (cwd), same as config.json. Not configurable.
+export const XAI_TOKEN_FILE = './xai-oauth.json'
 
 export async function xaiEndpoints(): Promise<{ deviceEndpoint: string; tokenEndpoint: string }> {
   const res = await fetch('https://auth.x.ai/.well-known/openid-configuration', { signal: AbortSignal.timeout(20_000) })
@@ -31,14 +27,13 @@ export async function xaiEndpoints(): Promise<{ deviceEndpoint: string; tokenEnd
 }
 
 // A refresh response without a refresh_token keeps the previous one
-export async function saveXaiTokens(file: string, data: Record<string, unknown>, refreshToken?: string) {
+export async function saveXaiTokens(data: Record<string, unknown>, refreshToken?: string) {
   const lifetime = Number(data.expires_in) * 1000
   const tokens = { accessToken: data.access_token, refreshToken: data.refresh_token ?? refreshToken, expiresAt: Date.now() + lifetime, lifetime }
   if (!validTokens(tokens)) {
     throw new Error('xAI token response is missing access_token, refresh_token or expires_in')
   }
-  await mkdir(dirname(file), { recursive: true, mode: 0o700 })
-  await writeAtomic(file, JSON.stringify(tokens), 0o600)
+  await writeAtomic(XAI_TOKEN_FILE, JSON.stringify(tokens), 0o600)
   return tokens
 }
 
@@ -54,10 +49,10 @@ function validTokens(tokens: Record<string, unknown> | null): tokens is Record<s
   )
 }
 
-function readTokens(file: string): XaiTokens {
-  const tokens = JSON.parse(readFile(file, { encoding: 'utf-8' }))
+function readTokens(): XaiTokens {
+  const tokens = JSON.parse(readFile(XAI_TOKEN_FILE, { encoding: 'utf-8' }))
   if (!validTokens(tokens)) {
-    throw new Error(`${file} is not an xAI login; run \`pnpm xai:login\` again`)
+    throw new Error(`${XAI_TOKEN_FILE} is not an xAI login; run \`pnpm xai:login\` again`)
   }
   return tokens
 }
@@ -70,19 +65,19 @@ function expiring({ expiresAt, lifetime }: XaiTokens) {
 
 let refreshing: Promise<string> | undefined
 
-// One refresh at a time, in this process and across processes through <file>.lock: xAI refresh tokens
-// are single-use, so a second refresh with the same one fails with invalid_grant
-export async function xaiAccessToken(file: string): Promise<string> {
-  const tokens = readTokens(file)
+// One refresh at a time, in this process and across processes through xai-oauth.json.lock: xAI refresh
+// tokens are single-use, so a second refresh with the same one fails with invalid_grant
+export async function xaiAccessToken(): Promise<string> {
+  const tokens = readTokens()
   if (!expiring(tokens)) return tokens.accessToken
-  refreshing ??= refresh(file).finally(() => {
+  refreshing ??= refresh().finally(() => {
     refreshing = undefined
   })
   return refreshing
 }
 
-async function refresh(file: string) {
-  const lock = `${file}.lock`
+async function refresh() {
+  const lock = `${XAI_TOKEN_FILE}.lock`
   const started = Date.now()
   let handle: Awaited<ReturnType<typeof open>> | undefined
   while (!handle) {
@@ -99,7 +94,7 @@ async function refresh(file: string) {
   }
   try {
     // Another process may have refreshed while this one waited
-    const tokens = readTokens(file)
+    const tokens = readTokens()
     if (!expiring(tokens)) return tokens.accessToken
     const { tokenEndpoint } = await xaiEndpoints()
     const res = await fetch(tokenEndpoint, {
@@ -112,7 +107,7 @@ async function refresh(file: string) {
     if (!res.ok) {
       throw new Error(`xAI token refresh responded ${res.status}: ${data?.error_description ?? data?.error ?? 'no error details'}; run \`pnpm xai:login\` again`)
     }
-    return (await saveXaiTokens(file, data, tokens.refreshToken)).accessToken
+    return (await saveXaiTokens(data, tokens.refreshToken)).accessToken
   } finally {
     await handle.close()
     await rm(lock, { force: true })

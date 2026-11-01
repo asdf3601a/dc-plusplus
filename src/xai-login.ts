@@ -1,14 +1,14 @@
-// Entry point of `pnpm xai:login`: signs in to xAI with the device code flow (RFC 8628) and saves the
-// tokens that XaiTTS uses when xaiTTS.apiKey is empty
+// Entry point of `pnpm xai:login`: signs in to xAI with the device code flow (RFC 8628) and saves
+// ./xai-oauth.json, which XaiTTS uses when xaiTTS.apiKey is empty
 
 import { setTimeout as sleep } from 'node:timers/promises'
-import { instances } from './Utils/Instances'
-import { saveXaiTokens, XAI_CLIENT_ID, XAI_SCOPE, xaiEndpoints, xaiTokenFile } from './Utils/XaiOAuth'
+import { Logger } from 'tslog'
+import { loggerOptions } from './Utils/Config'
+import { saveXaiTokens, XAI_CLIENT_ID, XAI_SCOPE, XAI_TOKEN_FILE, xaiEndpoints } from './Utils/XaiOAuth'
 
-const logger = instances.mainLogger.getSubLogger({ name: 'XaiLogin' })
+const logger = new Logger(loggerOptions).getSubLogger({ name: 'XaiLogin' })
 
 async function login() {
-  const file = xaiTokenFile(instances.config.xaiTTS.tokenFile)
   const { deviceEndpoint, tokenEndpoint } = await xaiEndpoints()
   // biome-ignore lint/style/useNamingConvention: OAuth parameter
   const res = await fetch(deviceEndpoint, { method: 'POST', body: new URLSearchParams({ client_id: XAI_CLIENT_ID, scope: XAI_SCOPE }) })
@@ -29,8 +29,8 @@ async function login() {
     })
     const data = await poll.json().catch(() => undefined)
     if (poll.ok) {
-      await saveXaiTokens(file, data)
-      logger.info(`Signed in; the tokens are in ${file}`)
+      await saveXaiTokens(data)
+      logger.info(`Signed in; the tokens are in ${XAI_TOKEN_FILE}`)
       return
     }
     if (data?.error === 'slow_down') interval += 5

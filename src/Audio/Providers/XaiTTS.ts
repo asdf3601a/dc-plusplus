@@ -1,7 +1,7 @@
 import { existsSync as exists } from 'node:fs'
 import type { ILogObj, Logger } from 'tslog'
 import type { XaiTTSConfig } from '../../Utils/Config'
-import { xaiAccessToken, xaiTokenFile } from '../../Utils/XaiOAuth'
+import { XAI_TOKEN_FILE, xaiAccessToken } from '../../Utils/XaiOAuth'
 import { fetchWithRetry } from '../FetchWithRetry'
 import type { SynthesisSignal, TTSProvider } from '../TTSProvider'
 
@@ -20,15 +20,15 @@ export class XaiTTS implements TTSProvider {
   }
 
   public unavailableReason() {
-    const { apiKey, tokenFile } = this.config()
-    return apiKey || exists(xaiTokenFile(tokenFile)) ? undefined : 'xaiTTS.apiKey is not set in config.json and there is no xAI login (run `pnpm xai:login`)'
+    const { apiKey } = this.config()
+    return apiKey || exists(XAI_TOKEN_FILE) ? undefined : 'xaiTTS.apiKey is not set in config.json and there is no xAI login (run `pnpm xai:login`)'
   }
 
   public async synthesize(text: string, lang: string, voice: string, signal: SynthesisSignal): Promise<Uint8Array | null> {
-    const { apiKey, tokenFile } = this.config()
+    const { apiKey } = this.config()
     let token = apiKey
     try {
-      token ||= await xaiAccessToken(xaiTokenFile(tokenFile))
+      token ||= await xaiAccessToken()
       const res = await fetchWithRetry('https://api.x.ai/v1/tts', {
         method: 'POST',
         // biome-ignore lint/style/useNamingConvention: HTTP header
