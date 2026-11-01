@@ -253,8 +253,9 @@ export async function restore(dir: string, { baseDir = BACKUP_DIR, dataVersion }
   const listed = new Set(manifest.entries.map((entry) => resolve(entry.original)))
   // Files in the backed-up directories now that the backup does not have
   const extra = manifest.dirs.flatMap((path) => filesIn(resolve(path))).filter((file) => !listed.has(file))
-  const inDirs = (original: string) => manifest.dirs.some((path) => !relative(resolve(path), resolve(original)).startsWith('..'))
-  const others = manifest.entries.map((entry) => entry.original).filter((original) => original !== database && !sidecars.includes(original) && !inDirs(original))
+  const others = manifest.entries
+    .map((entry) => entry.original)
+    .filter((original) => original !== database && !sidecars.includes(original) && !manifest.dirs.some((path) => isInside(original, path)))
   let replaced: string
   try {
     replaced = await backup({ database, rawDatabase: true, dirs: manifest.dirs, files: others, baseDir, reason: 'restore', dataVersion })
