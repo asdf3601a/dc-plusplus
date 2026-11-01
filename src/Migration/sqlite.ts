@@ -61,31 +61,23 @@ export function integrityProblems(path: string): string[] {
 }
 
 // Waits (LOCK_TRIES tries, LOCK_RETRY_MS apart, calling onRetry before each wait) until no other
-// connection holds the database at path locked, then returns undefined; still locked, returns what holds
-// it. Takes the lock only for a moment and changes nothing.
-export async function databaseLock(path: string, onRetry: (attempt: number, tries: number, waitMs: number) => void) {
+// connection holds the database at path locked, then returns false; true if it is still locked. Takes
+// the lock only for a moment and changes nothing.
+export async function databaseLocked(path: string, onRetry: (attempt: number, tries: number, waitMs: number) => void) {
   const db = new Database(path, { timeout: 0 })
   try {
     for (let attempt = 1; ; attempt++) {
       try {
         db.exec('BEGIN EXCLUSIVE')
         db.exec('ROLLBACK')
-        return undefined
+        return false
       } catch (error) {
         if (!isBusy(error)) throw error
       }
-      if (attempt === LOCK_TRIES) break
+      if (attempt === LOCK_TRIES) return true
       onRetry(attempt, LOCK_TRIES, LOCK_RETRY_MS)
       await sleep(LOCK_RETRY_MS)
     }
-    try {
-      db.exec('BEGIN IMMEDIATE')
-      db.exec('ROLLBACK')
-    } catch (error) {
-      if (isBusy(error)) return 'another connection is writing to it (is the bot or another `pnpm migrate` running?)'
-      throw error
-    }
-    return 'another connection has a read transaction open (e.g. an sqlite3 shell or a database browser)'
   } finally {
     db.close()
   }

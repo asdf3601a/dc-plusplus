@@ -8,7 +8,7 @@ import { ASSET_STEPS, ASSETS_DIR, assetConfigFiles } from './assets/steps'
 import { BACKUP_DIR, backup, RestoreError, restore } from './backup'
 import { importMongoDump, MONGO_TTS_PROVIDERS, preflightMongoDump } from './import-mongo'
 import { databasePath, readRecord, recordFilePath, type VersionRecord, writeRecord } from './record'
-import { databaseLock, migrationNames, unmappedTTSTypes } from './sqlite'
+import { databaseLocked, migrationNames, unmappedTTSTypes } from './sqlite'
 
 // Version of the app-side data format (assets/<id>.json). The database is versioned by Prisma's
 // migration history instead. Bump it only for a breaking change, at most once per PR, and add exactly
@@ -123,16 +123,18 @@ function currentDataVersion() {
   return record.kind === 'ok' ? record.version : null
 }
 
-// Waits a few seconds for another connection to release the database; if it does not, logs what holds
-// it (ending in outcome) and returns false. True when there is no database yet.
+// Waits a few seconds for another connection to release the database; if it does not, logs that it is
+// in use (with outcome) and returns false. True when there is no database yet.
 async function databaseUnlocked(outcome: string) {
   const path = databasePath()
   if (!exists(path)) return true
-  const holder = await databaseLock(path, (attempt, tries, waitMs) => {
+  const locked = await databaseLocked(path, (attempt, tries, waitMs) => {
     logger.warn(`The database ${path} is locked; trying again in ${waitMs / 1000} s (${attempt}/${tries})`)
   })
-  if (holder === undefined) return true
-  logger.error(`The database ${path} is still locked: ${holder}; ${outcome}. Close that connection and run it again`)
+  if (!locked) return true
+  logger.error(
+    `The database ${path} is in use by another connection (the bot, another \`pnpm migrate\`, an sqlite3 shell or a database browser); ${outcome}. Close it and run it again`
+  )
   return false
 }
 
