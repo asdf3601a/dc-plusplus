@@ -50,7 +50,7 @@ export class OpenRouterTTS implements TTSProvider {
       }
       const type = res.headers.get('content-type') ?? ''
       const body = new Uint8Array(await res.arrayBuffer())
-      if (body.length === 0 || body.length % 2 !== 0 || looksLikeJson(body)) {
+      if (body.length === 0 || body.length % 2 !== 0 || /^application\/json\s*(;|$)/i.test(type)) {
         this.logger.error(`OpenRouter TTS returned no usable pcm (${type || 'no content type'}, ${body.length} bytes)`)
         return null
       }
@@ -90,13 +90,4 @@ export class OpenRouterTTS implements TTSProvider {
       return null
     }
   }
-}
-
-// A 200 can still be an error body, whatever its Content-Type says
-function looksLikeJson(bytes: Uint8Array) {
-  for (const byte of bytes) {
-    if (byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d) continue
-    return byte === 0x7b || byte === 0x5b
-  }
-  return false
 }
