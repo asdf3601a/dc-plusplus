@@ -2,9 +2,8 @@ import type { ILogObj, Logger } from 'tslog'
 import { fetchWithRetry } from '../FetchWithRetry'
 import type { TTSProvider } from '../TTSProvider'
 
-// OpenRouter text to speech (POST /v1/audio/speech), decoded to 48kHz stereo s16 PCM. Its pcm can be
-// 24kHz or 48kHz mono, or 48kHz stereo already; mono is copied to both channels, and 24kHz is
-// upsampled by linear interpolation first (same idea as GoogleTranslateTTS, on s16 samples instead of mp3)
+// OpenRouter text to speech as 48kHz stereo pcm. The pcm's rate and channels depend on the model,
+// so they are read from the Content-Type and converted
 export class OpenRouterTTS implements TTSProvider {
   public readonly id = 'openrouter'
   public readonly format = 'pcm'
@@ -51,7 +50,7 @@ export class OpenRouterTTS implements TTSProvider {
       }
       const type = res.headers.get('content-type') ?? ''
       const body = new Uint8Array(await res.arrayBuffer())
-      if (body.length % 2 !== 0 || looksLikeJson(body)) {
+      if (body.length === 0 || body.length % 2 !== 0 || looksLikeJson(body)) {
         this.logger.error(`OpenRouter TTS returned no usable pcm (${type || 'no content type'}, ${body.length} bytes)`)
         return null
       }
@@ -59,7 +58,11 @@ export class OpenRouterTTS implements TTSProvider {
       const channels = Number(/channels=(\d+)/i.exec(type)?.[1] ?? '1')
       const mono = new Int16Array(body.buffer, body.byteOffset, body.length / 2)
 
-      if (rate === 48000 && channels === 2) return body
+      if (rate === 48000 && channels === 2) {
+        if (body.length % 4 === 0) return body
+        this.logger.error(`OpenRouter TTS returned a partial stereo frame (${body.length} bytes)`)
+        return null
+      }
 
       if (rate === 48000 && channels === 1) {
         const stereo = new Int16Array(mono.length * 2)
@@ -75,7 +78,7 @@ export class OpenRouterTTS implements TTSProvider {
         mono.forEach((sample, i) => {
           const interpolated = Math.round((prev + sample) / 2)
           prev = sample
-          stereo.set([interpolated, interpolated, sample, sample], i * 4) // 24kHz mono to 48kHz stereo
+          stereo.set([interpolated, interpolated, sample, sample], i * 4)
         })
         return new Uint8Array(stereo.buffer)
       }
@@ -89,8 +92,7 @@ export class OpenRouterTTS implements TTSProvider {
   }
 }
 
-// A 200 can still be an error body; OpenRouter's pcm content-type may be missing rate/channels, but a
-// JSON error body starts with { or [ regardless of what Content-Type says
+// A 200 can still be an error body, whatever its Content-Type says
 function looksLikeJson(bytes: Uint8Array) {
   for (const byte of bytes) {
     if (byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d) continue
