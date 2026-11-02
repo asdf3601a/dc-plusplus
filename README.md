@@ -105,7 +105,7 @@ If you want to use OpenRouter text to speech, set `openrouterTTS.apiKey` (an [Op
   "switched_in": "<Text when switched into to the channel>"
 }
 ```
-`voice` must be one of the `supported_voices` of the model set in `openrouterTTS.model`; check the [OpenRouter models API](https://openrouter.ai/docs) for the model you configured. `lang` is not sent to OpenRouter; the language comes from the voice. Avoid `[...]` in the announcement text: some models read bracketed text as a tone instruction instead of speaking it.
+`voice` must be one of the `supported_voices` of the model set in `openrouterTTS.model`; check the [OpenRouter models API](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties) for the model you configured. `lang` is not sent to OpenRouter; the language comes from the voice. Avoid `[...]` in the announcement text: some models read bracketed text as a tone instruction instead of speaking it.
 
 The first start after upgrading to config version 4.1 saves the old file as `config-<old version>.json` and exits; check `config.json` and start again.
 
