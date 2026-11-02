@@ -140,6 +140,7 @@ logs/
 caches/
 config*.json
 xai-oauth.json*
+openai-oauth.json*
 vlogdata.json
 vlogdata.json.bak
 mongo*.json

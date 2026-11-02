@@ -1,4 +1,7 @@
+import { existsSync as exists } from 'node:fs'
 import type { ILogObj, Logger } from 'tslog'
+import { OPENAI_TOKEN_FILE, openaiAccessToken } from '../../Utils/OpenaiOAuth'
+import { fetchWithRetry } from '../FetchWithRetry'
 import type { TTSProvider } from '../TTSProvider'
 
 const MODEL = 'gpt-realtime-2.1-mini'
@@ -14,7 +17,8 @@ interface ServerEvent {
 }
 
 // OpenAI Realtime over a WebSocket, one connection per text. The Realtime pcm is 24kHz mono s16le,
-// converted to 48kHz stereo
+// converted to 48kHz stereo. Without openaiTTS.apiKey, the ChatGPT login is exchanged for a client secret
+// (an ephemeral key) for each connection
 export class OpenaiTTS implements TTSProvider {
   public readonly id = 'openai'
   public readonly format = 'pcm'
@@ -28,10 +32,36 @@ export class OpenaiTTS implements TTSProvider {
   }
 
   public unavailableReason() {
-    return this.apiKey() ? undefined : 'openaiTTS.apiKey is not set in config.json'
+    return this.apiKey() || exists(OPENAI_TOKEN_FILE) ? undefined : 'openaiTTS.apiKey is not set in config.json and there is no OpenAI login (run `pnpm openai:login`)'
   }
 
-  public synthesize(text: string, lang: string, voice: string, signal: AbortSignal): Promise<Uint8Array | null> {
+  private async clientSecret(voice: string, signal: AbortSignal) {
+    const token = await openaiAccessToken()
+    const res = await fetchWithRetry('https://api.openai.com/v1/realtime/client_secrets', {
+      method: 'POST',
+      // biome-ignore lint/style/useNamingConvention: HTTP header
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: { type: 'realtime', model: MODEL, audio: { output: voice ? { voice } : {} } } }),
+      signal
+    })
+    const data = await res.json().catch(() => undefined)
+    if (!res.ok || typeof data?.value !== 'string') {
+      const detail = String(data?.error?.message ?? 'no client secret').replaceAll(token, '<redacted>')
+      throw new Error(`client_secrets responded ${res.status}: ${detail}`)
+    }
+    return data.value
+  }
+
+  public async synthesize(text: string, lang: string, voice: string, signal: AbortSignal): Promise<Uint8Array | null> {
+    let key = this.apiKey()
+    if (!key) {
+      try {
+        key = await this.clientSecret(voice, signal)
+      } catch (error) {
+        this.logger.error(`OpenAI Realtime TTS failed: ${error instanceof Error ? error.message : error}`)
+        return null
+      }
+    }
     return new Promise((resolve) => {
       if (signal.aborted) {
         this.logger.error('OpenAI Realtime TTS failed: aborted at the synthesis time limit')
@@ -39,7 +69,7 @@ export class OpenaiTTS implements TTSProvider {
       }
       const chunks: Buffer[] = []
       // biome-ignore lint/style/useNamingConvention: HTTP header
-      const ws = new NodeWebSocket(`wss://api.openai.com/v1/realtime?model=${MODEL}`, { headers: { Authorization: `Bearer ${this.apiKey()}` } })
+      const ws = new NodeWebSocket(`wss://api.openai.com/v1/realtime?model=${MODEL}`, { headers: { Authorization: `Bearer ${key}` } })
 
       const finish = (error?: string) => {
         signal.removeEventListener('abort', onAbort)

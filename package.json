@@ -12,6 +12,7 @@
     "start": "node dist/index.js",
     "migrate": "node dist/migrate.js",
     "xai:login": "node dist/xai-login.js",
+    "openai:login": "node dist/openai-login.js",
     "lint": "biome check --write",
     "lint:unsafe": "biome check --write --unsafe",
     "biome:ci": "biome ci",
