@@ -53,6 +53,10 @@ export class OpenaiTTS implements TTSProvider {
   }
 
   public async synthesize(text: string, lang: string, voice: string, signal: AbortSignal): Promise<Uint8Array | null> {
+    if (signal.aborted) {
+      this.logger.error('OpenAI Realtime TTS failed: aborted at the synthesis time limit')
+      return null
+    }
     let key = this.apiKey()
     if (!key) {
       try {

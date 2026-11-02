@@ -54,7 +54,12 @@ function readTokens(): OpenaiTokens {
   if (!exists(OPENAI_TOKEN_FILE)) {
     throw new Error(`openaiTTS.apiKey is not set and there is no ${OPENAI_TOKEN_FILE}; run \`pnpm openai:login\``)
   }
-  const tokens = JSON.parse(readFile(OPENAI_TOKEN_FILE, { encoding: 'utf-8' }))
+  let tokens: Record<string, unknown> | null
+  try {
+    tokens = JSON.parse(readFile(OPENAI_TOKEN_FILE, { encoding: 'utf-8' }))
+  } catch (error) {
+    throw new Error(`${OPENAI_TOKEN_FILE} is not valid JSON: ${error instanceof Error ? error.message : error}; run \`pnpm openai:login\` again`)
+  }
   if (!validTokens(tokens)) {
     throw new Error(`${OPENAI_TOKEN_FILE} is not an OpenAI login; run \`pnpm openai:login\` again`)
   }
