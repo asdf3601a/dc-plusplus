@@ -1,6 +1,6 @@
 # Adding a TTS provider
 
-A TTS provider turns text into audio bytes. Caching, queueing and playback are done by the audio module, so a provider is one class plus a line that registers it. The existing ones are in `src/Audio/Providers/`: `GoogleTranslateTTS.ts`, `GoogleCloudTTS.ts` and `XaiTTS.ts`.
+A TTS provider turns text into audio bytes. Caching, queueing and playback are done by the audio module, so a provider is one class plus a line that registers it. The existing ones are in `src/Audio/Providers/`: `GoogleTranslateTTS.ts`, `GoogleCloudTTS.ts`, `XaiTTS.ts` and `OpenaiTTS.ts`.
 
 ## The provider
 

@@ -94,6 +94,22 @@ The login reuses the Grok CLI client id and is not an officially supported third
 
 The login is saved to `xai-oauth.json` next to `config.json`; delete it to sign out.
 
+If you want to use OpenAI text to speech, set `openaiTTS.apiKey` in the config, and json content is:
+```json
+{
+  "provider": "openai",
+  "lang": "<language of the text, such as English or zh-TW>",
+  "voice": "<OpenAI Realtime voice, such as marin>",
+  "join": "<Text when connected to the channel>",
+  "left": "<Text when left the channel>",
+  "switched_out": "<Text when switched out from the channel>",
+  "switched_in": "<Text when switched into to the channel>"
+}
+```
+The text is read by `gpt-realtime-2.1-mini` over the [Realtime API](https://developers.openai.com/api/docs/guides/realtime-websocket), which is told to read it word for word in `lang`. The Speech API (`/v1/audio/speech`) is not used: `gpt-4o-mini-tts` is [retired on 2027-01-06](https://developers.openai.com/api/docs/deprecations). `voice` is a [Realtime voice](https://developers.openai.com/api/docs/guides/realtime-conversations) such as `marin`; an empty `voice` uses OpenAI's default. When a server's `/voice tts` switches to openai, set `voice_lang` and `voice_name` to these values too.
+
+The first start after upgrading to config version 4.1 saves the old file as `config-<old version>.json` and exits; check `config.json` and start again.
+
 Files in the old format (`use_wave_tts` instead of `provider`) are converted by `pnpm migrate` when upgrading to [data version](docs/UPGRADING.md#data-version) 2; see the [TTS provider migration guide](docs/migration/TTS_PROVIDER_MIGRATION.md). Files added later must use `provider`; files without a usable `provider` are skipped with an error.
 
 Example:
