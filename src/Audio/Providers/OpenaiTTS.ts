@@ -33,6 +33,10 @@ export class OpenaiTTS implements TTSProvider {
 
   public synthesize(text: string, lang: string, voice: string, signal: AbortSignal): Promise<Uint8Array | null> {
     return new Promise((resolve) => {
+      if (signal.aborted) {
+        this.logger.error('OpenAI Realtime TTS failed: aborted at the synthesis time limit')
+        return resolve(null)
+      }
       const chunks: Buffer[] = []
       // biome-ignore lint/style/useNamingConvention: HTTP header
       const ws = new NodeWebSocket(`wss://api.openai.com/v1/realtime?model=${MODEL}`, { headers: { Authorization: `Bearer ${this.apiKey()}` } })
@@ -45,7 +49,6 @@ export class OpenaiTTS implements TTSProvider {
         resolve(error ? null : toStereo48k(Buffer.concat(chunks)))
       }
       const onAbort = () => finish('aborted at the synthesis time limit')
-      if (signal.aborted) return finish('aborted at the synthesis time limit')
       signal.addEventListener('abort', onAbort)
 
       ws.onopen = () => {
