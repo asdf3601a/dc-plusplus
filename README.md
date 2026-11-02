@@ -98,7 +98,7 @@ If you want to use OpenAI text to speech, set `openaiTTS.apiKey` in the config, 
 ```json
 {
   "provider": "openai",
-  "lang": "<language of the text, such as English or zh-TW>",
+  "lang": "<language code, such as zh-TW>",
   "voice": "<OpenAI Realtime voice, such as marin>",
   "join": "<Text when connected to the channel>",
   "left": "<Text when left the channel>",
@@ -106,7 +106,7 @@ If you want to use OpenAI text to speech, set `openaiTTS.apiKey` in the config, 
   "switched_in": "<Text when switched into to the channel>"
 }
 ```
-The text is read by `gpt-realtime-2.1-mini` over the [Realtime API](https://developers.openai.com/api/docs/guides/realtime-websocket), which is told to read it word for word in `lang`. The Speech API (`/v1/audio/speech`) is not used: `gpt-4o-mini-tts` is [retired on 2027-01-06](https://developers.openai.com/api/docs/deprecations). `voice` is a [Realtime voice](https://developers.openai.com/api/docs/guides/realtime-conversations) such as `marin`; an empty `voice` uses OpenAI's default. When a server's `/voice tts` switches to openai, set `voice_lang` and `voice_name` to these values too.
+The text is read by `gpt-realtime-2.1-mini` over the [Realtime API](https://developers.openai.com/api/docs/guides/realtime-websocket), which is told to read it word for word in `lang`. `lang` is a language code such as `zh-TW`, as in the other providers' TTS files. The Speech API (`/v1/audio/speech`) is not used: `gpt-4o-mini-tts` is [retired on 2027-01-06](https://developers.openai.com/api/docs/deprecations). `voice` is a [Realtime voice](https://developers.openai.com/api/docs/guides/realtime-conversations) such as `marin`; an empty `voice` uses OpenAI's default. When a server's `/voice tts` switches to openai, set `voice_lang` and `voice_name` to these values too.
 
 The first start after upgrading to config version 4.1 saves the old file as `config-<old version>.json` and exits; check `config.json` and start again.
 

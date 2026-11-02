@@ -14,7 +14,7 @@ Add `src/Audio/Providers/<Name>TTS.ts` with a class that implements `TTSProvider
 
 `lang` and `voice` come from the TTS file, or from `voice_lang` and `voice_name` of `/voice tts` for voice messages. Send them as given; they never go in the config.
 
-Send every HTTP request through `fetchWithRetry` from `src/Audio/FetchWithRetry.ts` and pass it `signal`. It retries a 429, a 5xx or a network error up to twice, after 0.5 s then 1 s or the `Retry-After`, and returns the last response or throws the last error. `signal` aborts at the 30 second synthesis limit. Work that does not follow the signal, like decoding, is cut off by the same limit in `AudioCache`, which then logs an error and discards a late result.
+An HTTP provider sends every request through `fetchWithRetry` from `src/Audio/FetchWithRetry.ts` and passes it `signal`. It retries a 429, a 5xx or a network error up to twice, after 0.5 s then 1 s or the `Retry-After`, and returns the last response or throws the last error. A provider that does not use HTTP handles its own retry and abort. `signal` aborts at the 30 second synthesis limit. Work that does not follow the signal, like decoding, is cut off by the same limit in `AudioCache`, which then logs an error and discards a late result.
 
 `AudioCache` stores the result in `caches/` under the md5 of `<id>:<text>-<lang>-<voice>`, with the extension `.opus` or `.pcm`. A `null` or empty result is never cached, so the next announcement tries again.
 
@@ -31,7 +31,7 @@ A new config section in `src/Utils/Config.ts` needs its interface, a field in `C
 ## Checklist
 
 1. `src/Audio/Providers/<Name>TTS.ts` implements `TTSProvider`, and `synthesize` logs and returns `null` on failure.
-2. Every request goes through `fetchWithRetry` with `signal`.
+2. An HTTP provider sends every request through `fetchWithRetry` with `signal`. A provider that does not use HTTP handles its own retry and abort.
 3. The provider is in `providers` in `src/Utils/Instances.ts`.
 4. Credentials are in `config.json` or a git-ignored 0600 file in the project root, never `.env` or outside the project.
 5. A config addition bumps `configVersion` and updates the README upgrade note.
