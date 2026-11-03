@@ -94,6 +94,21 @@ The login reuses the Grok CLI client id and is not an officially supported third
 
 The login is saved to `xai-oauth.json` next to `config.json`; delete it to sign out.
 
+If you want to use OpenRouter text to speech, set `openrouterTTS.apiKey` (an [OpenRouter API key](https://openrouter.ai/settings/keys)) and `openrouterTTS.model` (a model that serves `/v1/audio/speech`, such as `microsoft/mai-voice-2.1-flash`) in the config, and json content is:
+```json
+{
+  "provider": "openrouter",
+  "voice": "<a voice from that model's supported_voices, such as en-US-Harper:MAI-Voice-2.1-Flash>",
+  "join": "<Text when connected to the channel>",
+  "left": "<Text when left the channel>",
+  "switched_out": "<Text when switched out from the channel>",
+  "switched_in": "<Text when switched into to the channel>"
+}
+```
+`voice` must be one of the `supported_voices` of the model set in `openrouterTTS.model`; check the [OpenRouter models API](https://openrouter.ai/docs) for the model you configured. `lang` is not sent to OpenRouter; the language comes from the voice. Avoid `[...]` in the announcement text: some models read bracketed text as a tone instruction instead of speaking it.
+
+The first start after upgrading to config version 4.1 saves the old file as `config-<old version>.json` and exits; check `config.json` and start again.
+
 Files in the old format (`use_wave_tts` instead of `provider`) are converted by `pnpm migrate` when upgrading to [data version](docs/UPGRADING.md#data-version) 2; see the [TTS provider migration guide](docs/migration/TTS_PROVIDER_MIGRATION.md). Files added later must use `provider`; files without a usable `provider` are skipped with an error.
 
 Example:
@@ -124,6 +139,16 @@ Example:
   "provider": "xai",
   "lang": "en",
   "voice": "eve",
+  "join": "Jim joined the channel",
+  "left": "Jim left the channel",
+  "switched_out": "Jim switched out from the channel",
+  "switched_in": "Jim switched into  the channel"
+}
+```
+```json
+{
+  "provider": "openrouter",
+  "voice": "en-US-Harper:MAI-Voice-2.1-Flash",
   "join": "Jim joined the channel",
   "left": "Jim left the channel",
   "switched_out": "Jim switched out from the channel",

@@ -7,6 +7,7 @@ export interface ConfigValue {
   discord: DiscordConfig
   googleTTS: GoogleTTSConfig
   xaiTTS: XaiTTSConfig
+  openrouterTTS: OpenRouterTTSConfig
   sqlite: SQLiteConfig
   debug: boolean
 }
@@ -26,6 +27,11 @@ export interface XaiTTSConfig {
   apiKey: string
 }
 
+export interface OpenRouterTTSConfig {
+  apiKey: string
+  model: string
+}
+
 export interface SQLiteConfig {
   databaseUrl: string
 }
@@ -38,10 +44,11 @@ export const loggerOptions: ISettingsParam<ILogObj> = {
 }
 
 export class Config {
-  private configVersion = 4
+  private configVersion = 4.1
   private _discord: DiscordConfig
   private _googleTTS: GoogleTTSConfig
   private _xaiTTS: XaiTTSConfig
+  private _openrouterTTS: OpenRouterTTSConfig
   private _sqlite: SQLiteConfig
   private _debug: boolean
   private logger: Logger<ILogObj>
@@ -54,6 +61,7 @@ export class Config {
   }
   private readonly googleTTSDefault = { apiKey: '' }
   private readonly xaiTTSDefault = { apiKey: '' }
+  private readonly openrouterTTSDefault = { apiKey: '', model: '' }
   private readonly sqliteDefault = { databaseUrl: 'file:./prisma/voice-log.db' }
 
   constructor(mainLogger: Logger<ILogObj>) {
@@ -79,6 +87,12 @@ export class Config {
         apiKey: config.xaiTTS.apiKey ? config.xaiTTS.apiKey : this.xaiTTSDefault.apiKey
       }
 
+      if (!config.openrouterTTS) config.openrouterTTS = {}
+      this._openrouterTTS = {
+        apiKey: config.openrouterTTS.apiKey ? config.openrouterTTS.apiKey : this.openrouterTTSDefault.apiKey,
+        model: config.openrouterTTS.model ? config.openrouterTTS.model : this.openrouterTTSDefault.model
+      }
+
       if (!config.sqlite) config.sqlite = {}
       this._sqlite = {
         databaseUrl: config.sqlite.databaseUrl ? config.sqlite.databaseUrl : this.sqliteDefault.databaseUrl
@@ -96,6 +110,7 @@ export class Config {
       this._discord = this.discordDefault
       this._googleTTS = this.googleTTSDefault
       this._xaiTTS = this.xaiTTSDefault
+      this._openrouterTTS = this.openrouterTTSDefault
       this._sqlite = this.sqliteDefault
       this._debug = false
       this.save()
@@ -167,6 +182,7 @@ export class Config {
         discord: this._discord,
         googleTTS: this._googleTTS,
         xaiTTS: this._xaiTTS,
+        openrouterTTS: this._openrouterTTS,
         sqlite: this._sqlite,
         debug: this._debug
       },
@@ -186,6 +202,10 @@ export class Config {
 
   public get xaiTTS() {
     return this._xaiTTS
+  }
+
+  public get openrouterTTS() {
+    return this._openrouterTTS
   }
 
   public get sqlite() {
