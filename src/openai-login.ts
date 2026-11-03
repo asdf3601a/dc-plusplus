@@ -9,7 +9,12 @@ import { OPENAI_CLIENT_ID, OPENAI_ISSUER, OPENAI_TOKEN_FILE, saveOpenaiTokens } 
 const logger = new Logger(loggerOptions).getSubLogger({ name: 'OpenaiLogin' })
 
 function postJson(path: string, body: object) {
-  return fetch(`${OPENAI_ISSUER}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+  return fetch(`${OPENAI_ISSUER}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20_000)
+  })
 }
 
 async function login() {
