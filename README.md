@@ -34,7 +34,7 @@
 6. `pnpm migrate` (when there is something to migrate, it backs up your data first)
 7. `pnpm start`
 
-The bot does not migrate on its own: when its data needs migrating, it exits with code 78, and pm2 does not restart it. For backups, restoring one and what to do when a migration fails, see [docs/UPGRADING.md](docs/UPGRADING.md).
+The bot does not migrate on its own: when its data needs migrating, it exits with code 78, and pm2 does not restart it. After the configVersion bump, the first `pm2 deploy` stops at `pnpm migrate` (it backs up to `config-3.json` and exits 78); check `config.json` and deploy again. For backups, restoring one and what to do when a migration fails, see [docs/UPGRADING.md](docs/UPGRADING.md).
 
 ## Database Migration
 
@@ -89,6 +89,8 @@ If you want to use xAI text to speech, set `xaiTTS.apiKey` in the config, or run
 `lang` is an [xAI language code](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#supported-languages) or `auto`, and `voice` is an [xAI voice](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#voices) such as `eve` or a custom voice ID. Both are sent as given; an empty `voice` uses xAI's default. When a server's `/voice tts` switches to xai, set `voice_lang` and `voice_name` to xAI values too.
 
 If the login stops working, the bot logs an error and skips that text: run `pnpm xai:login` again, or set `xaiTTS.apiKey` if xAI answers 403.
+
+The login reuses the Grok CLI client id and is not an officially supported third-party use, so it may stop working; `xaiTTS.apiKey` is the fallback.
 
 The login is saved to `xai-oauth.json` next to `config.json`; delete it to sign out.
 
