@@ -158,8 +158,13 @@ export class AudioCache {
     const signal = AbortSignal.timeout(timeout)
     const synthesis = provider.synthesize(text, lang, voice, signal)
     // Not every step of synthesize() honors the signal, so the race enforces the limit
-    const timedOut = new Promise<undefined>((resolve) => signal.addEventListener('abort', () => resolve(undefined)))
-    const data = await Promise.race([synthesis, timedOut])
+    let resolveTimeout!: (value: undefined) => void
+    const timedOut = new Promise<undefined>((resolve) => {
+      resolveTimeout = resolve
+    })
+    const onAbort = () => resolveTimeout(undefined)
+    signal.addEventListener('abort', onAbort)
+    const data = await Promise.race([synthesis, timedOut]).finally(() => signal.removeEventListener('abort', onAbort))
     if (data === undefined) {
       this.logger?.error(`${provider.id} did not finish "${text}" within ${timeout / 1000} s`)
       synthesis
