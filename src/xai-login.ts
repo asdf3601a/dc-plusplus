@@ -19,13 +19,15 @@ async function login() {
   logger.info(`Open ${device.verification_uri} and enter the code ${device.user_code}`)
 
   let interval = Number(device.interval) || 5
-  const deadline = Date.now() + Number(device.expires_in) * 1000
+  const expiresIn = typeof device.expires_in === 'number' && device.expires_in > 0 ? device.expires_in : 300
+  const deadline = Date.now() + expiresIn * 1000
   while (Date.now() < deadline) {
     await sleep(interval * 1000)
     const poll = await fetch(tokenEndpoint, {
       method: 'POST',
       // biome-ignore lint/style/useNamingConvention: OAuth parameters
-      body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: device.device_code, client_id: XAI_CLIENT_ID })
+      body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: device.device_code, client_id: XAI_CLIENT_ID }),
+      signal: AbortSignal.timeout(20_000)
     })
     const data = await poll.json().catch(() => undefined)
     if (poll.ok) {

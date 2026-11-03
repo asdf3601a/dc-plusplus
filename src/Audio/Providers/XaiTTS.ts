@@ -54,6 +54,10 @@ export class XaiTTS implements TTSProvider {
         this.logger.error(`xAI TTS returned no usable pcm (${type || 'no content type'}, ${body.byteLength} bytes)`)
         return null
       }
+      if (body.byteLength % 2 !== 0) {
+        this.logger.error(`xAI TTS returned an odd-length pcm body (${body.byteLength} bytes)`)
+        return null
+      }
       const mono = new Uint16Array(body)
       const stereo = new Uint16Array(mono.length * 2)
       mono.forEach((sample, i) => {
