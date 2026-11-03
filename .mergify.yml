@@ -1,11 +1,23 @@
 queue_rules:
-  - name: dev-queue
+  - name: dev-squash
+    merge_method: squash
     queue_conditions:
       - and:
           - base=dev
           - check-success=build
           - check-success=security-scan
           - 'label!=status:blocked'
+          - label=squash
+
+  - name: dev-queue
+    merge_method: merge
+    queue_conditions:
+      - and:
+          - base=dev
+          - check-success=build
+          - check-success=security-scan
+          - 'label!=status:blocked'
+          - label!=squash
 
 pull_request_rules:
   - name: Auto Merge renovate minor dep
@@ -20,16 +32,31 @@ pull_request_rules:
     actions:
       merge:
 
+  - name: Squash merge into dev (Label)
+    conditions:
+      - base=dev
+      - 'label!=status:blocked'
+      - author!=renovate[bot]
+      - 'label=status:ready-to-merge'
+      - label=squash
+      - check-success=build
+      - check-success=security-scan
+    actions:
+      queue:
+        name: dev-squash
+
   - name: Merge branch into dev (Label)
     conditions:
       - base=dev
       - 'label!=status:blocked'
       - author!=renovate[bot]
       - 'label=status:ready-to-merge'
+      - label!=squash
       - check-success=build
       - check-success=security-scan
     actions:
       queue:
         name: dev-queue
+
 merge_protections_settings:
   reporting_method: check-runs
