@@ -31,7 +31,12 @@ async function login() {
   while (Date.now() < deadline) {
     await sleep(interval * 1000)
     // biome-ignore lint/style/useNamingConvention: OAuth parameters
-    const poll = await postJson('/api/accounts/deviceauth/token', { device_auth_id: device.device_auth_id, user_code: device.user_code })
+    const poll = await postJson('/api/accounts/deviceauth/token', { device_auth_id: device.device_auth_id, user_code: device.user_code }).catch((error: unknown) => error)
+    // A timeout, a network error or a 5xx only skips this poll; the next one comes after the interval
+    if (!(poll instanceof Response) || poll.status >= 500) {
+      logger.warn(`OpenAI device authorization poll failed (${poll instanceof Response ? poll.status : poll instanceof Error ? poll.message : poll}); retrying`)
+      continue
+    }
     if (poll.status === 403 || poll.status === 404) continue
     const code = await poll.json().catch(() => undefined)
     if (!poll.ok || typeof code?.authorization_code !== 'string' || typeof code.code_verifier !== 'string') {
