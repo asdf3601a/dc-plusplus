@@ -54,7 +54,8 @@ async function login() {
         client_id: OPENAI_CLIENT_ID,
         // biome-ignore lint/style/useNamingConvention: OAuth parameters
         code_verifier: code.code_verifier
-      })
+      }),
+      signal: AbortSignal.timeout(20_000)
     })
     const data = await token.json().catch(() => undefined)
     if (!token.ok) {
