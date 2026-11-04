@@ -11,7 +11,7 @@ const logger = new Logger(loggerOptions).getSubLogger({ name: 'XaiLogin' })
 async function login() {
   const { deviceEndpoint, tokenEndpoint } = await xaiEndpoints()
   // biome-ignore lint/style/useNamingConvention: OAuth parameter
-  const res = await fetch(deviceEndpoint, { method: 'POST', body: new URLSearchParams({ client_id: XAI_CLIENT_ID, scope: XAI_SCOPE }) })
+  const res = await fetch(deviceEndpoint, { method: 'POST', body: new URLSearchParams({ client_id: XAI_CLIENT_ID, scope: XAI_SCOPE }), signal: AbortSignal.timeout(20_000) })
   const device = await res.json().catch(() => undefined)
   if (!res.ok || typeof device?.device_code !== 'string' || typeof device.user_code !== 'string' || typeof device.verification_uri !== 'string') {
     throw new Error(`xAI device authorization responded ${res.status}: ${device?.error_description ?? device?.error ?? 'no device code'}`)
@@ -28,7 +28,12 @@ async function login() {
       // biome-ignore lint/style/useNamingConvention: OAuth parameters
       body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:device_code', device_code: device.device_code, client_id: XAI_CLIENT_ID }),
       signal: AbortSignal.timeout(20_000)
-    })
+    }).catch((error: unknown) => error)
+    // A timeout, a network error or a 5xx only skips this poll; the next one comes after the interval
+    if (!(poll instanceof Response) || poll.status >= 500) {
+      logger.warn(`xAI token poll failed (${poll instanceof Response ? poll.status : poll instanceof Error ? poll.message : poll}); retrying`)
+      continue
+    }
     const data = await poll.json().catch(() => undefined)
     if (poll.ok) {
       await saveXaiTokens(data)

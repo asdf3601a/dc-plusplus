@@ -34,7 +34,7 @@
 6. `pnpm migrate` (when there is something to migrate, it backs up your data first)
 7. `pnpm start`
 
-The bot does not migrate on its own: when its data needs migrating, it exits with code 78, and pm2 does not restart it. After the configVersion bump, the first `pm2 deploy` stops at `pnpm migrate` (it backs up to `config-3.json` and exits 78); check `config.json` and deploy again. For backups, restoring one and what to do when a migration fails, see [docs/UPGRADING.md](docs/UPGRADING.md).
+The bot does not migrate on its own: when its data needs migrating, it exits with code 78, and pm2 does not restart it. After the configVersion bump, the first `pm2 deploy` stops at `pnpm migrate` (it backs up the old config as `config-<old version>.json` and exits 78); check `config.json` and deploy again. For backups, restoring one and what to do when a migration fails, see [docs/UPGRADING.md](docs/UPGRADING.md).
 
 ## Database Migration
 
@@ -93,8 +93,6 @@ If the login stops working, the bot logs an error and skips that text: run `pnpm
 The login reuses the Grok CLI client id and is not an officially supported third-party use, so it may stop working; `xaiTTS.apiKey` is the fallback.
 
 The login is saved to `xai-oauth.json` next to `config.json`; delete it to sign out.
-
-The first start after upgrading to config version 4 saves the old file as `config-3.json` and exits; check `config.json` and start again.
 
 Files in the old format (`use_wave_tts` instead of `provider`) are converted by `pnpm migrate` when upgrading to [data version](docs/UPGRADING.md#data-version) 2; see the [TTS provider migration guide](docs/migration/TTS_PROVIDER_MIGRATION.md). Files added later must use `provider`; files without a usable `provider` are skipped with an error.
 
