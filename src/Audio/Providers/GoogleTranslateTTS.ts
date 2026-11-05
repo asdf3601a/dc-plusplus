@@ -1,5 +1,6 @@
 import type { MPEGDecoderWebWorker } from 'mpg123-decoder'
 import type { ILogObj, Logger } from 'tslog'
+import { fetchWithRetry } from '../FetchWithRetry'
 import type { TTSProvider } from '../TTSProvider'
 
 // Google Translate TTS, decoded to 48kHz stereo s16 PCM
@@ -34,11 +35,11 @@ export class GoogleTranslateTTS implements TTSProvider {
     return run
   }
 
-  public async synthesize(text: string, lang: string): Promise<Uint8Array | null> {
+  public async synthesize(text: string, lang: string, _voice: string, signal: AbortSignal): Promise<Uint8Array | null> {
     // URLSearchParams encodes &, # and ? in the text, which encodeURI left as URL syntax
     const ttsURL = `https://translate.google.com.tw/translate_tts?${new URLSearchParams({ ie: 'UTF-8', q: text, tl: lang, client: 'tw-ob' })}`
     try {
-      const res = await fetch(ttsURL)
+      const res = await fetchWithRetry(ttsURL, { signal })
       if (!res.ok) {
         this.logger.error(`TTS ${text} in ${lang} download failed. response code: ${res.status}`)
         return null

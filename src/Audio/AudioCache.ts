@@ -19,6 +19,8 @@ export interface AudioCacheOptions {
   maxAgeMs?: number
   // Eviction runs this long after a new file is written (one run per window)
   evictDelayMs?: number
+  // A synthesis that has not finished after this long resolves to null (default 30 s)
+  synthesisTimeoutMs?: number
   logger?: Logger<ILogObj>
 }
 
@@ -34,6 +36,7 @@ export class AudioCache {
   private readonly maxBytes: number
   private readonly maxAgeMs: number
   private readonly evictDelayMs: number
+  private readonly synthesisTimeoutMs: number
   private readonly logger: Logger<ILogObj> | undefined
   private readonly inFlight = new Map<string, Promise<string | null>>()
   private evicting: Promise<EvictionResult> | undefined
@@ -44,6 +47,7 @@ export class AudioCache {
     this.maxBytes = options.maxBytes ?? 500 * 1024 * 1024
     this.maxAgeMs = options.maxAgeMs ?? 30 * 24 * 60 * 60 * 1000
     this.evictDelayMs = options.evictDelayMs ?? 60 * 1000
+    this.synthesisTimeoutMs = options.synthesisTimeoutMs ?? 30 * 1000
     this.logger = options.logger?.getSubLogger({ name: 'AudioCache' })
   }
 
@@ -150,8 +154,34 @@ export class AudioCache {
   }
 
   private async create(provider: TTSProvider, path: string, text: string, lang: string, voice: string): Promise<string | null> {
-    const data = await provider.synthesize(text, lang, voice)
+    const timeout = this.synthesisTimeoutMs
+    const signal = AbortSignal.timeout(timeout)
+    const synthesis = provider.synthesize(text, lang, voice, signal)
+    // Not every step of synthesize() honors the signal, so the race enforces the limit
+    let resolveTimeout!: (value: undefined) => void
+    const timedOut = new Promise<undefined>((resolve) => {
+      resolveTimeout = resolve
+    })
+    const onAbort = () => resolveTimeout(undefined)
+    signal.addEventListener('abort', onAbort)
+    const data = await Promise.race([synthesis, timedOut]).finally(() => signal.removeEventListener('abort', onAbort))
+    if (data === undefined) {
+      this.logger?.error(`${provider.id} did not finish "${text}" within ${timeout / 1000} s`)
+      synthesis
+        .then((late) => {
+          if (late) this.logger?.warn(`${provider.id} finished "${text}" after the time limit; discarded`)
+        })
+        .catch(() => {
+          // Nothing waits on it any more; this only stops an unhandled rejection
+        })
+      return null
+    }
     if (data === null) return null
+    // An empty file would be a cache hit that plays nothing until it is evicted
+    if (data.length === 0) {
+      this.logger?.error(`${provider.id} returned no audio for "${text}"; not caching it`)
+      return null
+    }
     // A crash mid-write leaves only a *.tmp file, which never matches a cache key
     try {
       await writeAtomic(path, data)

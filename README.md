@@ -34,7 +34,7 @@
 6. `pnpm migrate` (when there is something to migrate, it backs up your data first)
 7. `pnpm start`
 
-The bot does not migrate on its own: when its data needs migrating, it exits with code 78, and pm2 does not restart it. For backups, restoring one and what to do when a migration fails, see [docs/UPGRADING.md](docs/UPGRADING.md).
+The bot does not migrate on its own: when its data needs migrating, it exits with code 78, and pm2 does not restart it. After the configVersion bump, the first `pm2 deploy` stops at `pnpm migrate` (it backs up the old config as `config-<old version>.json` and exits 78); check `config.json` and deploy again. For backups, restoring one and what to do when a migration fails, see [docs/UPGRADING.md](docs/UPGRADING.md).
 
 ## Database Migration
 
@@ -74,6 +74,26 @@ If you want to use the new google cloud text to speech, be sure to have apiKey i
 ```
 `lang` and `voice` available from https://cloud.google.com/text-to-speech/docs/voices
 
+If you want to use xAI text to speech, set `xaiTTS.apiKey` in the config, or run `pnpm build` and then `pnpm xai:login` in the project root to sign in once in the browser, and json content is:
+```json
+{
+  "provider": "xai",
+  "lang": "<xAI language code, or auto>",
+  "voice": "<xAI voice, such as eve, or a custom voice ID>",
+  "join": "<Text when connected to the channel>",
+  "left": "<Text when left the channel>",
+  "switched_out": "<Text when switched out from the channel>",
+  "switched_in": "<Text when switched into to the channel>"
+}
+```
+`lang` is an [xAI language code](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#supported-languages) or `auto`, and `voice` is an [xAI voice](https://docs.x.ai/developers/model-capabilities/audio/text-to-speech#voices) such as `eve` or a custom voice ID. Both are sent as given; an empty `voice` uses xAI's default. When a server's `/voice tts` switches to xai, set `voice_lang` and `voice_name` to xAI values too.
+
+If the login stops working, the bot logs an error and skips that text: run `pnpm xai:login` again, or set `xaiTTS.apiKey` if xAI answers 403.
+
+The login reuses the Grok CLI client id and is not an officially supported third-party use, so it may stop working; `xaiTTS.apiKey` is the fallback.
+
+The login is saved to `xai-oauth.json` next to `config.json`; delete it to sign out.
+
 Files in the old format (`use_wave_tts` instead of `provider`) are converted by `pnpm migrate` when upgrading to [data version](docs/UPGRADING.md#data-version) 2; see the [TTS provider migration guide](docs/migration/TTS_PROVIDER_MIGRATION.md). Files added later must use `provider`; files without a usable `provider` are skipped with an error.
 
 Example:
@@ -99,3 +119,16 @@ Example:
   "switched_in": "Jim switched into  the channel"
 }
 ```
+```json
+{
+  "provider": "xai",
+  "lang": "en",
+  "voice": "eve",
+  "join": "Jim joined the channel",
+  "left": "Jim left the channel",
+  "switched_out": "Jim switched out from the channel",
+  "switched_in": "Jim switched into  the channel"
+}
+```
+
+To add another TTS provider, see [docs/TTS_PROVIDERS.md](docs/TTS_PROVIDERS.md).

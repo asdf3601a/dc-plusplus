@@ -6,6 +6,7 @@ export interface ConfigValue {
   configVersion: string | number
   discord: DiscordConfig
   googleTTS: GoogleTTSConfig
+  xaiTTS: XaiTTSConfig
   sqlite: SQLiteConfig
   debug: boolean
 }
@@ -21,6 +22,10 @@ export interface GoogleTTSConfig {
   apiKey: string
 }
 
+export interface XaiTTSConfig {
+  apiKey: string
+}
+
 export interface SQLiteConfig {
   databaseUrl: string
 }
@@ -33,9 +38,10 @@ export const loggerOptions: ISettingsParam<ILogObj> = {
 }
 
 export class Config {
-  private configVersion = 3
+  private configVersion = 4
   private _discord: DiscordConfig
   private _googleTTS: GoogleTTSConfig
+  private _xaiTTS: XaiTTSConfig
   private _sqlite: SQLiteConfig
   private _debug: boolean
   private logger: Logger<ILogObj>
@@ -47,6 +53,7 @@ export class Config {
     admins: []
   }
   private readonly googleTTSDefault = { apiKey: '' }
+  private readonly xaiTTSDefault = { apiKey: '' }
   private readonly sqliteDefault = { databaseUrl: 'file:./prisma/voice-log.db' }
 
   constructor(mainLogger: Logger<ILogObj>) {
@@ -67,6 +74,11 @@ export class Config {
       if (!config.googleTTS) config.googleTTS = {}
       this._googleTTS = this.mergeGoogleTTSConfig(config)
 
+      if (!config.xaiTTS) config.xaiTTS = {}
+      this._xaiTTS = {
+        apiKey: config.xaiTTS.apiKey ? config.xaiTTS.apiKey : this.xaiTTSDefault.apiKey
+      }
+
       if (!config.sqlite) config.sqlite = {}
       this._sqlite = {
         databaseUrl: config.sqlite.databaseUrl ? config.sqlite.databaseUrl : this.sqliteDefault.databaseUrl
@@ -83,6 +95,7 @@ export class Config {
       this.logger.info('Generating empty config...')
       this._discord = this.discordDefault
       this._googleTTS = this.googleTTSDefault
+      this._xaiTTS = this.xaiTTSDefault
       this._sqlite = this.sqliteDefault
       this._debug = false
       this.save()
@@ -153,6 +166,7 @@ export class Config {
         configVersion: this.configVersion,
         discord: this._discord,
         googleTTS: this._googleTTS,
+        xaiTTS: this._xaiTTS,
         sqlite: this._sqlite,
         debug: this._debug
       },
@@ -168,6 +182,10 @@ export class Config {
 
   public get googleTTS() {
     return this._googleTTS
+  }
+
+  public get xaiTTS() {
+    return this._xaiTTS
   }
 
   public get sqlite() {
