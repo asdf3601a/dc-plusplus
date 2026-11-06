@@ -29,7 +29,6 @@ export interface XaiTTSConfig {
 
 export interface OpenRouterTTSConfig {
   apiKey: string
-  model: string
 }
 
 export interface SQLiteConfig {
@@ -61,7 +60,7 @@ export class Config {
   }
   private readonly googleTTSDefault = { apiKey: '' }
   private readonly xaiTTSDefault = { apiKey: '' }
-  private readonly openrouterTTSDefault = { apiKey: '', model: '' }
+  private readonly openrouterTTSDefault = { apiKey: '' }
   private readonly sqliteDefault = { databaseUrl: 'file:./prisma/voice-log.db' }
 
   constructor(mainLogger: Logger<ILogObj>) {
@@ -89,8 +88,7 @@ export class Config {
 
       if (!config.openrouterTTS) config.openrouterTTS = {}
       this._openrouterTTS = {
-        apiKey: config.openrouterTTS.apiKey ? config.openrouterTTS.apiKey : this.openrouterTTSDefault.apiKey,
-        model: config.openrouterTTS.model ? config.openrouterTTS.model : this.openrouterTTSDefault.model
+        apiKey: config.openrouterTTS.apiKey ? config.openrouterTTS.apiKey : this.openrouterTTSDefault.apiKey
       }
 
       if (!config.sqlite) config.sqlite = {}

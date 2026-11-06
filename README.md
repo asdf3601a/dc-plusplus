@@ -94,18 +94,19 @@ The login reuses the Grok CLI client id and is not an officially supported third
 
 The login is saved to `xai-oauth.json` next to `config.json`; delete it to sign out.
 
-If you want to use OpenRouter text to speech, set `openrouterTTS.apiKey` (an [OpenRouter API key](https://openrouter.ai/settings/keys)) and `openrouterTTS.model` (a model that serves `/v1/audio/speech`, such as `microsoft/mai-voice-2.1-flash`) in the config, and json content is:
+If you want to use OpenRouter text to speech, set `openrouterTTS.apiKey` (an [OpenRouter API key](https://openrouter.ai/settings/keys)) in the config, and json content is:
 ```json
 {
   "provider": "openrouter",
-  "voice": "<a voice from that model's supported_voices, such as en-US-Harper:MAI-Voice-2.1-Flash>",
+  "lang": "<language code, such as en-US>",
+  "voice": "<model_id@voice_name, such as heygen/heygen-voice-1-turbo:free@nadine>",
   "join": "<Text when connected to the channel>",
   "left": "<Text when left the channel>",
   "switched_out": "<Text when switched out from the channel>",
   "switched_in": "<Text when switched into to the channel>"
 }
 ```
-`voice` must be one of the `supported_voices` of the model set in `openrouterTTS.model`; check the [OpenRouter models API](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties) for the model you configured. `lang` is not sent to OpenRouter; the language comes from the voice. Avoid `[...]` in the announcement text: some models read bracketed text as a tone instruction instead of speaking it.
+For openrouter, `voice` (and `voice_name` in `/voice tts`) is `model_id@voice_name`: an OpenRouter model that serves `/v1/audio/speech` and one of that model's voices, such as `heygen/heygen-voice-1-turbo:free@nadine`; check the [OpenRouter models API](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties) for both. It is split on the last `@`; without an `@` (or with nothing after it) the whole string is the model and no voice is sent, so the model's default voice is used. `lang` is not sent to OpenRouter; the language comes from the voice. Avoid `[...]` in the announcement text: some models read bracketed text as a tone instruction instead of speaking it.
 
 Some OpenRouter speech models are language models, so the text they read (such as user or channel names) can act as instructions to them: they may then say something other than the text.
 
@@ -150,7 +151,8 @@ Example:
 ```json
 {
   "provider": "openrouter",
-  "voice": "en-US-Harper:MAI-Voice-2.1-Flash",
+  "lang": "en-US",
+  "voice": "heygen/heygen-voice-1-turbo:free@nadine",
   "join": "Jim joined the channel",
   "left": "Jim left the channel",
   "switched_out": "Jim switched out from the channel",

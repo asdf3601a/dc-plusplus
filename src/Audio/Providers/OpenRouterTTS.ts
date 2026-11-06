@@ -12,22 +12,18 @@ export class OpenRouterTTS implements TTSProvider {
   public readonly usesVoice = true
   private logger: Logger<ILogObj>
   private apiKey: () => string
-  private model: () => string
   private mp3Models = new Set<string>()
   private mp3Decoder?: MPEGDecoderWebWorker
   // The decoder keeps state between decode() and reset(), so decodes run one at a time
   private decoding: Promise<unknown> = Promise.resolve()
 
-  constructor(apiKey: () => string, model: () => string, logger: Logger<ILogObj>) {
+  constructor(apiKey: () => string, logger: Logger<ILogObj>) {
     this.apiKey = apiKey
-    this.model = model
     this.logger = logger.getSubLogger({ name: 'OpenRouterTTS' })
   }
 
   public unavailableReason() {
-    if (!this.apiKey()) return 'openrouterTTS.apiKey is not set in config.json'
-    if (!this.model()) return 'openrouterTTS.model is not set in config.json'
-    return undefined
+    return this.apiKey() ? undefined : 'openrouterTTS.apiKey is not set in config.json'
   }
 
   private decode(mp3: Uint8Array) {
@@ -52,7 +48,7 @@ export class OpenRouterTTS implements TTSProvider {
       body: JSON.stringify({
         model,
         input: text,
-        voice,
+        ...(voice ? { voice } : {}),
         // biome-ignore lint/style/useNamingConvention: OpenRouter API field
         response_format: format
       }),
@@ -60,12 +56,15 @@ export class OpenRouterTTS implements TTSProvider {
     })
   }
 
-  public async synthesize(text: string, _lang: string, voice: string, signal: AbortSignal): Promise<Uint8Array | null> {
-    if (!voice) {
-      this.logger.error('OpenRouter TTS requires a voice, but none was given')
+  // The voice name is model_id@voice_name, split on the last @ since model ids do not contain @
+  public async synthesize(text: string, _lang: string, modelVoice: string, signal: AbortSignal): Promise<Uint8Array | null> {
+    const at = modelVoice.lastIndexOf('@')
+    const model = at === -1 ? modelVoice : modelVoice.slice(0, at)
+    const voice = at === -1 ? '' : modelVoice.slice(at + 1)
+    if (!model) {
+      this.logger.error('OpenRouter TTS requires a model in the voice name (model_id@voice_name), but none was given')
       return null
     }
-    const model = this.model()
     const errorDetail = async (res: Response) => (await res.text()).replace(/\s+/g, ' ').trim().slice(0, 300) || 'no error details'
     try {
       const remembered = this.mp3Models.has(model)

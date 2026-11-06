@@ -30,11 +30,7 @@ const providers = [
   new GoogleTranslateTTS(mainLogger),
   new GoogleCloudTTS(() => config.googleTTS.apiKey, mainLogger),
   new XaiTTS(() => config.xaiTTS.apiKey, mainLogger),
-  new OpenRouterTTS(
-    () => config.openrouterTTS.apiKey,
-    () => config.openrouterTTS.model,
-    mainLogger
-  )
+  new OpenRouterTTS(() => config.openrouterTTS.apiKey, mainLogger)
 ]
 const audio = new Audio(new Map(providers.map((provider) => [provider.id, provider])), pluginManager, mainLogger, {
   systemProvider: 'google-cloud'
